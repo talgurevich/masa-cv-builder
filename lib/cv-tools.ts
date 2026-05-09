@@ -1,18 +1,52 @@
 import { z } from "zod";
 import { tool, type Tool } from "ai";
-import type { CVData } from "./cv-schema";
+import type {
+  CVData,
+  EducationEntry,
+  ExperienceEntry,
+  VolunteeringEntry,
+} from "./cv-schema";
 import { emptyCV } from "./cv-schema";
 
 /**
- * Each tool returns a small ack object. The LLM sees the ack as a
- * tool_result, the server commits the mutated CV to Postgres after the
- * turn ends.
+ * Each list-mutation tool returns an ack that includes the up-to-date
+ * entries (with indices) so the LLM knows what to target on subsequent
+ * remove / update calls. This eliminates the previous bug where the bot
+ * couldn't remove or edit entries because it had no stable references.
  */
 
-type Ack = { ok: true; section: string; note?: string };
+interface IndexedEntry {
+  index: number;
+  label: string;
+  dates?: string;
+}
 
-function ackOf(section: string, note?: string): Ack {
-  return { ok: true, section, note };
+function fmtEducation(e: EducationEntry, i: number): IndexedEntry {
+  return {
+    index: i,
+    label:
+      [e.degree, e.field, e.institution].filter(Boolean).join(" · ") ||
+      "(ללא כותרת)",
+    dates: [e.start, e.end].filter(Boolean).join("–") || undefined,
+  };
+}
+
+function fmtExperience(x: ExperienceEntry, i: number): IndexedEntry {
+  return {
+    index: i,
+    label:
+      [x.role, x.company].filter(Boolean).join(" · ") || "(ללא כותרת)",
+    dates: [x.start, x.end].filter(Boolean).join("–") || undefined,
+  };
+}
+
+function fmtVolunteering(v: VolunteeringEntry, i: number): IndexedEntry {
+  return {
+    index: i,
+    label:
+      [v.role, v.organization].filter(Boolean).join(" · ") || "(ללא כותרת)",
+    dates: [v.start, v.end].filter(Boolean).join("–") || undefined,
+  };
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -21,9 +55,10 @@ function ackOf(section: string, note?: string): Ack {
 
 export function buildCvTools(state: { cv: CVData }) {
   const tools: Record<string, Tool> = {
+    // ── Personal ─────────────────────────────────────────────────────────
     update_personal: tool({
       description:
-        'עדכון "פרטים אישיים" של המשתמש. מעבירים רק שדות שהמשתמש סיפק; שדות שלא סופקו - השאר ריקים. חובה לוודא ערך לפני שליחה.',
+        'עדכון "פרטים אישיים" של המשתמש. מעבירים רק שדות שהמשתמש סיפק. שולחים רק שדות שיש להם ערך.',
       parameters: z.object({
         name: z.string().optional(),
         phone: z.string().optional(),
@@ -35,24 +70,25 @@ export function buildCvTools(state: { cv: CVData }) {
       }),
       execute: async (input) => {
         state.cv.personal = { ...state.cv.personal, ...input };
-        return ackOf("personal");
+        return { ok: true, section: "personal", value: state.cv.personal };
       },
     }),
 
+    // ── Summary ──────────────────────────────────────────────────────────
     update_summary: tool({
-      description: 'הגדרה או החלפה של תקציר הקורות חיים (paragraph אחד).',
-      parameters: z.object({
-        text: z.string().min(1),
-      }),
+      description:
+        'הגדרה או החלפה של תקציר הקורות חיים (paragraph אחד). עבור עריכת תקציר קיים - גם כן זה הכלי הנכון.',
+      parameters: z.object({ text: z.string().min(1) }),
       execute: async ({ text }) => {
         state.cv.summary = text;
-        return ackOf("summary");
+        return { ok: true, section: "summary" };
       },
     }),
 
+    // ── Education ────────────────────────────────────────────────────────
     add_education: tool({
       description:
-        'הוספת פריט אחד לסעיף "השכלה וקורסים". קוראים לכלי הזה פעם לכל מוסד / קורס נפרד.',
+        'הוספת פריט אחד לסעיף "השכלה וקורסים". משתמש כאשר המשתמש מספר על מוסד / קורס חדש שטרם נרשם.',
       parameters: z.object({
         institution: z.string(),
         degree: z.string().optional(),
@@ -64,13 +100,74 @@ export function buildCvTools(state: { cv: CVData }) {
       }),
       execute: async (input) => {
         state.cv.education.push(input);
-        return ackOf("education", `entries: ${state.cv.education.length}`);
+        return {
+          ok: true,
+          section: "education",
+          total: state.cv.education.length,
+          entries: state.cv.education.map(fmtEducation),
+        };
       },
     }),
 
+    update_education_at: tool({
+      description:
+        'עדכון פריט קיים בסעיף "השכלה" לפי אינדקס. שלח רק שדות שצריך לשנות. השתמש לתקן טעויות או להוסיף פרטים שחסרו.',
+      parameters: z.object({
+        index: z.number().int().nonnegative(),
+        institution: z.string().optional(),
+        degree: z.string().optional(),
+        field: z.string().optional(),
+        start: z.string().optional(),
+        end: z.string().optional(),
+        grade: z.string().optional(),
+        highlights: z.array(z.string()).optional(),
+      }),
+      execute: async ({ index, ...patch }) => {
+        if (index < 0 || index >= state.cv.education.length) {
+          return {
+            ok: false,
+            error: `אין פריט באינדקס ${index}; יש ${state.cv.education.length} פריטים.`,
+            entries: state.cv.education.map(fmtEducation),
+          };
+        }
+        state.cv.education[index] = { ...state.cv.education[index], ...patch };
+        return {
+          ok: true,
+          section: "education",
+          updated_index: index,
+          entries: state.cv.education.map(fmtEducation),
+        };
+      },
+    }),
+
+    remove_education_at: tool({
+      description:
+        'מחיקת פריט מסעיף "השכלה" לפי אינדקס. השתמש כאשר המשתמש אומר במפורש להסיר / למחוק / לבטל פריט.',
+      parameters: z.object({
+        index: z.number().int().nonnegative(),
+      }),
+      execute: async ({ index }) => {
+        if (index < 0 || index >= state.cv.education.length) {
+          return {
+            ok: false,
+            error: `אין פריט באינדקס ${index}; יש ${state.cv.education.length} פריטים.`,
+            entries: state.cv.education.map(fmtEducation),
+          };
+        }
+        const removed = state.cv.education.splice(index, 1)[0];
+        return {
+          ok: true,
+          section: "education",
+          removed_label: fmtEducation(removed, index).label,
+          entries: state.cv.education.map(fmtEducation),
+        };
+      },
+    }),
+
+    // ── Experience ───────────────────────────────────────────────────────
     add_experience: tool({
       description:
-        'הוספת תפקיד אחד לסעיף "ניסיון תעסוקתי". קוראים לכלי פעם לכל תפקיד נפרד.',
+        'הוספת תפקיד אחד לסעיף "ניסיון תעסוקתי". משתמש כאשר המשתמש מספר על תפקיד חדש שטרם נרשם.',
       parameters: z.object({
         company: z.string(),
         role: z.string(),
@@ -80,13 +177,75 @@ export function buildCvTools(state: { cv: CVData }) {
       }),
       execute: async (input) => {
         state.cv.experience.push({ ...input, bullets: input.bullets ?? [] });
-        return ackOf("experience", `roles: ${state.cv.experience.length}`);
+        return {
+          ok: true,
+          section: "experience",
+          total: state.cv.experience.length,
+          entries: state.cv.experience.map(fmtExperience),
+        };
       },
     }),
 
+    update_experience_at: tool({
+      description:
+        'עדכון תפקיד קיים ב"ניסיון תעסוקתי" לפי אינדקס. שלח רק שדות שצריך לשנות.',
+      parameters: z.object({
+        index: z.number().int().nonnegative(),
+        company: z.string().optional(),
+        role: z.string().optional(),
+        start: z.string().optional(),
+        end: z.string().optional(),
+        bullets: z.array(z.string()).optional(),
+      }),
+      execute: async ({ index, ...patch }) => {
+        if (index < 0 || index >= state.cv.experience.length) {
+          return {
+            ok: false,
+            error: `אין תפקיד באינדקס ${index}; יש ${state.cv.experience.length} תפקידים.`,
+            entries: state.cv.experience.map(fmtExperience),
+          };
+        }
+        state.cv.experience[index] = {
+          ...state.cv.experience[index],
+          ...patch,
+        };
+        return {
+          ok: true,
+          section: "experience",
+          updated_index: index,
+          entries: state.cv.experience.map(fmtExperience),
+        };
+      },
+    }),
+
+    remove_experience_at: tool({
+      description:
+        'מחיקת תפקיד מ"ניסיון תעסוקתי" לפי אינדקס. השתמש כאשר המשתמש אומר במפורש להסיר.',
+      parameters: z.object({
+        index: z.number().int().nonnegative(),
+      }),
+      execute: async ({ index }) => {
+        if (index < 0 || index >= state.cv.experience.length) {
+          return {
+            ok: false,
+            error: `אין תפקיד באינדקס ${index}; יש ${state.cv.experience.length} תפקידים.`,
+            entries: state.cv.experience.map(fmtExperience),
+          };
+        }
+        const removed = state.cv.experience.splice(index, 1)[0];
+        return {
+          ok: true,
+          section: "experience",
+          removed_label: fmtExperience(removed, index).label,
+          entries: state.cv.experience.map(fmtExperience),
+        };
+      },
+    }),
+
+    // ── Military (single object, not list) ────────────────────────────────
     set_military: tool({
       description:
-        'הגדרת "ניסיון צבאי". אפשר לסמן skipped אם המשתמש לא שירת, או national_service אם שירות לאומי.',
+        'הגדרת "ניסיון צבאי". אפשר לסמן skipped אם המשתמש לא שירת, או national_service אם שירות לאומי. גם לעריכה - זה הכלי הנכון.',
       parameters: z.object({
         skipped: z.boolean().default(false),
         national_service: z.boolean().default(false),
@@ -99,13 +258,14 @@ export function buildCvTools(state: { cv: CVData }) {
       }),
       execute: async (input) => {
         state.cv.military = { ...state.cv.military, ...input };
-        return ackOf("military");
+        return { ok: true, section: "military", value: state.cv.military };
       },
     }),
 
+    // ── Volunteering ─────────────────────────────────────────────────────
     add_volunteering: tool({
       description:
-        'הוספת פריט אחד לסעיף "התנדבויות". קוראים פעם לכל התנדבות נפרדת.',
+        'הוספת פריט אחד לסעיף "התנדבויות".',
       parameters: z.object({
         organization: z.string(),
         role: z.string().optional(),
@@ -115,16 +275,75 @@ export function buildCvTools(state: { cv: CVData }) {
       }),
       execute: async (input) => {
         state.cv.volunteering.push(input);
-        return ackOf(
-          "volunteering",
-          `entries: ${state.cv.volunteering.length}`
-        );
+        return {
+          ok: true,
+          section: "volunteering",
+          total: state.cv.volunteering.length,
+          entries: state.cv.volunteering.map(fmtVolunteering),
+        };
       },
     }),
 
+    update_volunteering_at: tool({
+      description:
+        'עדכון התנדבות קיימת לפי אינדקס. שלח רק שדות שצריך לשנות.',
+      parameters: z.object({
+        index: z.number().int().nonnegative(),
+        organization: z.string().optional(),
+        role: z.string().optional(),
+        start: z.string().optional(),
+        end: z.string().optional(),
+        description: z.string().optional(),
+      }),
+      execute: async ({ index, ...patch }) => {
+        if (index < 0 || index >= state.cv.volunteering.length) {
+          return {
+            ok: false,
+            error: `אין התנדבות באינדקס ${index}; יש ${state.cv.volunteering.length} התנדבויות.`,
+            entries: state.cv.volunteering.map(fmtVolunteering),
+          };
+        }
+        state.cv.volunteering[index] = {
+          ...state.cv.volunteering[index],
+          ...patch,
+        };
+        return {
+          ok: true,
+          section: "volunteering",
+          updated_index: index,
+          entries: state.cv.volunteering.map(fmtVolunteering),
+        };
+      },
+    }),
+
+    remove_volunteering_at: tool({
+      description:
+        'מחיקת התנדבות לפי אינדקס. השתמש כאשר המשתמש אומר במפורש להסיר.',
+      parameters: z.object({
+        index: z.number().int().nonnegative(),
+      }),
+      execute: async ({ index }) => {
+        if (index < 0 || index >= state.cv.volunteering.length) {
+          return {
+            ok: false,
+            error: `אין התנדבות באינדקס ${index}; יש ${state.cv.volunteering.length} התנדבויות.`,
+            entries: state.cv.volunteering.map(fmtVolunteering),
+          };
+        }
+        const removed = state.cv.volunteering.splice(index, 1)[0];
+        return {
+          ok: true,
+          section: "volunteering",
+          removed_label: fmtVolunteering(removed, index).label,
+          entries: state.cv.volunteering.map(fmtVolunteering),
+        };
+      },
+    }),
+
+    // ── Skills (already replace-style) ────────────────────────────────────
     update_skills: tool({
       description:
-        'החלפת כל רשימות הכישורים. שולחים תמיד את הרשימה המלאה, לא דלתא.',
+        'החלפת רשימות כישורים. שולחים תמיד רשימה מלאה, לא דלתא. גם לעריכה - שלח את הרשימה החדשה במלואה.',
       parameters: z.object({
         technical: z.array(z.string()).optional(),
         languages: z
@@ -134,17 +353,18 @@ export function buildCvTools(state: { cv: CVData }) {
       }),
       execute: async (input) => {
         state.cv.skills = { ...state.cv.skills, ...input };
-        return ackOf("skills");
+        return { ok: true, section: "skills", value: state.cv.skills };
       },
     }),
 
+    // ── Completion ───────────────────────────────────────────────────────
     mark_complete: tool({
       description:
         'קוראים לכלי הזה כאשר כל שבעת הסעיפים מולאו והמשתמש מאושר. הצעד הבא הוא הצעה ליצירת PDF.',
       parameters: z.object({}),
       execute: async () => {
         state.cv.meta.last_updated = new Date().toISOString();
-        return ackOf("complete");
+        return { ok: true, section: "complete" };
       },
     }),
   };
@@ -158,7 +378,6 @@ export function buildCvTools(state: { cv: CVData }) {
  */
 export function loadIntoState(data: unknown): { cv: CVData } {
   const cv = (data && typeof data === "object" ? data : emptyCV()) as CVData;
-  // Defensive: ensure all keys exist so tools can push without crashes.
   cv.personal ??= {};
   cv.summary ??= "";
   cv.education ??= [];
