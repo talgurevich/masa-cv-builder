@@ -1,9 +1,10 @@
 "use client";
 
 import { useChat } from "@ai-sdk/react";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { Message } from "ai";
 import { ToolCallChip } from "./ToolCallChip";
+import { ThinkingIndicator } from "./ThinkingIndicator";
 
 interface Props {
   cvId: string;
@@ -49,12 +50,13 @@ export function ChatPane({ cvId, initialMessages, onTurnComplete }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Auto-scroll to bottom on new messages.
+  // Auto-scroll to bottom on new messages OR when the thinking indicator
+  // appears/disappears (so the indicator is always visible).
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages]);
+  }, [messages, status]);
 
   // Focus the input on mount so users can start typing immediately.
   useEffect(() => {
@@ -86,6 +88,18 @@ export function ChatPane({ cvId, initialMessages, onTurnComplete }: Props) {
     (m, i) => !(i === 0 && m.role === "user" && m.content === FIRST_TURN_PROMPT)
   );
 
+  // Monotonic counter that grows as new content arrives. The thinking
+  // indicator uses this to detect "stream went silent" (= tool running).
+  const contentSize = useMemo(() => {
+    let size = 0;
+    for (const m of messages) {
+      if (typeof m.content === "string") size += m.content.length;
+      if (m.parts) size += JSON.stringify(m.parts).length;
+      if (m.toolInvocations) size += JSON.stringify(m.toolInvocations).length;
+    }
+    return size;
+  }, [messages]);
+
   return (
     <div className="flex flex-col h-full" onClick={handlePaneClick}>
       <div className="px-4 py-3 border-b border-slate-100">
@@ -96,9 +110,7 @@ export function ChatPane({ cvId, initialMessages, onTurnComplete }: Props) {
         {visibleMessages.map((m) => (
           <MessageBubble key={m.id} message={m} />
         ))}
-        {isLoading && (
-          <div className="text-sm text-slate-400 animate-pulse">…</div>
-        )}
+        <ThinkingIndicator status={status} contentSize={contentSize} />
         {error && (
           <div className="text-sm text-red-600">שגיאה: {error.message}</div>
         )}
