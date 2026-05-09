@@ -70,8 +70,10 @@ export function CVPreviewPane({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto bg-slate-100 p-6">
-        <div className="mx-auto bg-white shadow-md max-w-[210mm] aspect-[210/297] p-[14mm]">
+      <div className="flex-1 overflow-y-auto bg-slate-100 p-3 sm:p-6">
+        {/* A4 sheet — horizontally scrolls only if smaller than 210mm,
+            otherwise centers and clamps to the page width. */}
+        <div className="mx-auto bg-white shadow-md w-full max-w-[210mm] min-h-[297mm] p-[14mm]">
           <CVDocument data={data} />
         </div>
       </div>

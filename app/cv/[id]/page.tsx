@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { supabaseServer } from "@/lib/supabase/server";
 import type { CVData } from "@/lib/cv-schema";
 import { CVWorkbench } from "@/components/CVWorkbench";
+import type { Message } from "ai";
 
 export default async function CVPage({
   params,
@@ -11,20 +12,32 @@ export default async function CVPage({
   const { id } = await params;
   const supabase = await supabaseServer();
 
-  const { data: cv, error } = await supabase
-    .from("cvs")
-    .select("id, title, status, data, pdf_path")
-    .eq("id", id)
-    .single();
+  const [cvRes, msgRes] = await Promise.all([
+    supabase
+      .from("cvs")
+      .select("id, title, status, data, pdf_path")
+      .eq("id", id)
+      .single(),
+    supabase
+      .from("messages")
+      .select("content, created_at")
+      .eq("cv_id", id)
+      .order("created_at", { ascending: true }),
+  ]);
 
-  if (error || !cv) notFound();
+  if (cvRes.error || !cvRes.data) notFound();
+
+  const initialMessages = (msgRes.data ?? []).map(
+    (row) => row.content as Message
+  );
 
   return (
     <CVWorkbench
-      cvId={cv.id}
-      initialData={(cv.data as CVData) ?? null}
-      initialStatus={cv.status}
-      initialPdfPath={cv.pdf_path}
+      cvId={cvRes.data.id}
+      initialData={(cvRes.data.data as CVData) ?? null}
+      initialStatus={cvRes.data.status}
+      initialPdfPath={cvRes.data.pdf_path}
+      initialMessages={initialMessages}
     />
   );
 }

@@ -13,6 +13,20 @@ export function CVDocument({ data }: Props) {
   const { personal, summary, education, experience, military, volunteering, skills } =
     data;
 
+  // Detect a fully-empty CV and show a friendly placeholder instead of a
+  // blank A4. Heuristic: no name + no summary + no first entry in any section.
+  const isEmpty =
+    !personal?.name &&
+    !summary &&
+    !(education[0]?.institution) &&
+    !(experience[0]?.company) &&
+    !(military?.role || military?.unit) &&
+    !(volunteering[0]?.organization) &&
+    !(skills?.technical?.length) &&
+    !(skills?.languages?.length);
+
+  if (isEmpty) return <EmptyPreview />;
+
   const contactParts = [
     personal.phone,
     personal.email,
@@ -264,4 +278,44 @@ function dateRange(start?: string, end?: string): string {
   if (!start && !end) return "";
   if (start && end) return `${start} – ${end}`;
   return start || end || "";
+}
+
+function EmptyPreview() {
+  return (
+    <div className="h-full flex flex-col items-center justify-center text-center text-slate-400 py-16 px-8">
+      <svg
+        width="120"
+        height="150"
+        viewBox="0 0 120 150"
+        className="mb-6 opacity-40"
+        aria-hidden="true"
+      >
+        <rect
+          x="2"
+          y="2"
+          width="116"
+          height="146"
+          rx="8"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeDasharray="6 4"
+        />
+        <line x1="20" y1="28" x2="80" y2="28" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+        <line x1="20" y1="44" x2="100" y2="44" stroke="currentColor" strokeWidth="2" strokeLinecap="round" opacity="0.6" />
+        <line x1="20" y1="56" x2="70" y2="56" stroke="currentColor" strokeWidth="2" strokeLinecap="round" opacity="0.6" />
+        <line x1="20" y1="80" x2="60" y2="80" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+        <line x1="20" y1="96" x2="100" y2="96" stroke="currentColor" strokeWidth="2" strokeLinecap="round" opacity="0.4" />
+        <line x1="20" y1="108" x2="90" y2="108" stroke="currentColor" strokeWidth="2" strokeLinecap="round" opacity="0.4" />
+        <line x1="20" y1="120" x2="75" y2="120" stroke="currentColor" strokeWidth="2" strokeLinecap="round" opacity="0.4" />
+      </svg>
+      <p className="text-base font-medium text-slate-500">
+        מה שתספר/י בצ&apos;אט יופיע כאן בזמן אמת
+      </p>
+      <p className="text-sm mt-2 max-w-sm leading-relaxed">
+        קורות החיים יתעדכנו אוטומטית עם כל פרט שתמסור/תמסרי לבוט.
+        כשנסיים נוכל להפיק קובץ PDF מעוצב.
+      </p>
+    </div>
+  );
 }

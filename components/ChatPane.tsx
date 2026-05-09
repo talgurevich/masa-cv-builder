@@ -7,6 +7,7 @@ import { ToolCallChip } from "./ToolCallChip";
 
 interface Props {
   cvId: string;
+  initialMessages?: Message[];
   onTurnComplete: () => void;
 }
 
@@ -14,7 +15,7 @@ const FIRST_TURN_PROMPT =
   "התחל את השיחה: שלח את הודעת הפתיחה בעברית עם הסבר על שבעת הסעיפים, " +
   "ואז התחל לשאול את שאלות הסעיף הראשון (פרטים אישיים).";
 
-export function ChatPane({ cvId, onTurnComplete }: Props) {
+export function ChatPane({ cvId, initialMessages, onTurnComplete }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const initRef = useRef(false);
@@ -29,6 +30,7 @@ export function ChatPane({ cvId, onTurnComplete }: Props) {
     error,
   } = useChat({
     api: `/api/cv/${cvId}/chat`,
+    initialMessages,
     onFinish: () => {
       onTurnComplete();
       // Re-focus after the assistant finishes streaming.
@@ -36,14 +38,16 @@ export function ChatPane({ cvId, onTurnComplete }: Props) {
     },
   });
 
-  // Auto-trigger the welcome on a fresh CV.
+  // Auto-trigger the welcome on a fresh CV (only when there are no
+  // persisted messages — otherwise we're resuming an existing session).
   useEffect(() => {
     if (initRef.current) return;
-    if (messages.length === 0) {
+    if (messages.length === 0 && (initialMessages?.length ?? 0) === 0) {
       initRef.current = true;
       append({ role: "user", content: FIRST_TURN_PROMPT });
     }
-  }, [messages.length, append]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Auto-scroll to bottom on new messages.
   useEffect(() => {
