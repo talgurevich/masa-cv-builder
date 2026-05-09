@@ -47,3 +47,4 @@ coverage/
 
 # OS / temp
 *.tmp
+.vercel

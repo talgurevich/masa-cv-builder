@@ -16,6 +16,7 @@ const FIRST_TURN_PROMPT =
 
 export function ChatPane({ cvId, onTurnComplete }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const initRef = useRef(false);
 
   const {
@@ -28,7 +29,11 @@ export function ChatPane({ cvId, onTurnComplete }: Props) {
     error,
   } = useChat({
     api: `/api/cv/${cvId}/chat`,
-    onFinish: onTurnComplete,
+    onFinish: () => {
+      onTurnComplete();
+      // Re-focus after the assistant finishes streaming.
+      requestAnimationFrame(() => inputRef.current?.focus());
+    },
   });
 
   // Auto-trigger the welcome on a fresh CV.
@@ -47,6 +52,29 @@ export function ChatPane({ cvId, onTurnComplete }: Props) {
     }
   }, [messages]);
 
+  // Focus the input on mount so users can start typing immediately.
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  // Re-focus whenever the input becomes enabled again (e.g. after a turn).
+  useEffect(() => {
+    if (status === "ready") {
+      inputRef.current?.focus();
+    }
+  }, [status]);
+
+  // If the user clicks anywhere in the chat pane that isn't a button or a
+  // text-selectable region, return focus to the input. This covers the
+  // common "I clicked outside the input by accident" case.
+  function handlePaneClick(e: React.MouseEvent<HTMLDivElement>) {
+    const target = e.target as HTMLElement;
+    if (target.closest("button, a, input, textarea, [data-keep-selection]"))
+      return;
+    if (window.getSelection()?.toString()) return; // user is selecting text
+    inputRef.current?.focus();
+  }
+
   const isLoading = status === "submitted" || status === "streaming";
 
   // Hide the synthetic first-turn prompt from the user's view.
@@ -55,7 +83,7 @@ export function ChatPane({ cvId, onTurnComplete }: Props) {
   );
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full" onClick={handlePaneClick}>
       <div className="px-4 py-3 border-b border-slate-100">
         <h2 className="text-sm font-semibold text-slate-700">שיחה</h2>
       </div>
@@ -77,10 +105,12 @@ export function ChatPane({ cvId, onTurnComplete }: Props) {
         className="border-t border-slate-100 p-3 flex gap-2"
       >
         <input
+          ref={inputRef}
           dir="auto"
           value={input}
           onChange={handleInputChange}
           placeholder="כתוב/כתבי כאן…"
+          autoFocus
           className="flex-1 rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-ink"
           disabled={isLoading}
         />
