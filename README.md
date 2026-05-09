@@ -1,79 +1,144 @@
 # masa-cv-builder
 
-A hosted, conversational Hebrew CV builder for **'מסע אל האופק'** teams and
-students. Web app companion to the standalone Claude Code skill at
+Hosted, conversational Hebrew CV builder for **'מסע אל האופק'** teams and
+students. Companion web app to the standalone Claude Code skill at
 [talgurevich/cv-skill](https://github.com/talgurevich/cv-skill).
 
-> **Status:** design phase. No app code yet — see `docs/design.md` for the
-> full architecture spec.
-
----
-
-## What this is
-
-A Next.js web app that lets students and team members build a professional
-Hebrew CV through a friendly conversation, with a live preview pane and
-one-click PDF download. Powered by Claude Sonnet 4.6 with the same prompt
-that drives the Claude Code skill.
-
 ```
-   Browser (chat + live CV preview)
-      │
-      ▼
-   Next.js (Vercel)  ─────►  Anthropic Claude API
-      │                       (system prompt = SKILL.md, cached)
-      ▼
-   Supabase (Postgres + Storage)
-      │
-      ▼
-   Fly.io PDF worker (reuses generate_pdf.py)
+   Browser  →  Next.js (Vercel)  →  Anthropic Claude (Sonnet 4.6 + tools)
+                     │
+                     ▼
+                 Supabase (Auth + Postgres + Storage)
+                     │
+                     ▼
+                 Fly.io PDF worker (Chromium + generate_pdf.py)
 ```
 
-## Stack
+## What's here
 
-- **Frontend:** Next.js 15 (App Router) + React 19 + Tailwind + shadcn/ui (RTL)
-- **Chat:** Vercel AI SDK with streaming + tool use
-- **LLM:** Anthropic Claude Sonnet 4.6 (with prompt caching)
-- **Auth:** Clerk (Google + magic link, allowlist-gated)
-- **DB + storage:** Supabase
-- **PDF microservice:** Fly.io machine running the existing
-  [`generate_pdf.py`](https://github.com/talgurevich/cv-skill/blob/main/skills/cv-builder/scripts/generate_pdf.py)
+- `app/` — Next.js 15 App Router (chat page, dashboard, auth, API routes)
+- `components/` — chat pane, live CV preview pane, login button, etc.
+- `lib/` — Supabase clients (browser + server + middleware), Anthropic
+  helper, CV schema, **the 8 tool definitions** that Claude calls to mutate
+  CV state
+- `lib/prompts/cv-builder-system.md` — system prompt (mirrored from `cv-skill`)
+- `supabase/migrations/0001_init.sql` — schema, RLS policies, allowlist
+  trigger, storage bucket
+- `pdf-worker/` — standalone Flask + Chromium service for Fly.io
+- `docs/design.md` — full architecture spec
 
-## How this relates to `cv-skill`
+## Setup
 
-The [cv-skill repo](https://github.com/talgurevich/cv-skill) is the source
-of truth for the Hebrew CV-building **prompt + PDF template**. This app
-copies those assets at integration time:
+### 0. Prerequisites
 
-| From `cv-skill` | Into `masa-cv-builder` |
+- Node 20+
+- A Supabase project ([create one](https://supabase.com/dashboard))
+- A Vercel project (we'll connect it later)
+- An Anthropic API key
+- Fly.io CLI (`brew install flyctl`) for the PDF worker
+- A Google Cloud OAuth client (Web type) for sign-in
+
+### 1. Configure Supabase
+
+In the Supabase dashboard:
+
+1. **Run the migration** — open SQL Editor and paste
+   `supabase/migrations/0001_init.sql`. This creates `users`, `cvs`,
+   `messages`, `allowed_emails`, the `cv-pdfs` storage bucket, and all
+   RLS policies.
+2. **Enable Google OAuth** — Authentication → Providers → Google →
+   paste your Google OAuth client ID and secret. Copy the redirect URL
+   Supabase shows you and add it to your Google OAuth client's
+   "Authorized redirect URIs".
+3. **Add your email to the allowlist:**
+   ```sql
+   insert into public.allowed_emails (email) values ('you@example.com');
+   ```
+   Anyone not in this table gets blocked at sign-in by the trigger.
+
+### 2. Configure Vercel + env vars
+
+Copy `.env.example` to `.env.local` and fill in:
+
+```bash
+cp .env.example .env.local
+```
+
+You need:
+- `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` — Supabase Settings → API
+- `SUPABASE_SERVICE_ROLE_KEY` — same page, "Service role" secret. Keep server-only.
+- `ANTHROPIC_API_KEY` — https://console.anthropic.com → API Keys
+- `PDF_WORKER_URL` — fill in after step 4
+- `RENDER_SHARED_SECRET` — `openssl rand -hex 32`
+
+When deploying to Vercel, set the same vars under Project Settings → Environment Variables.
+
+### 3. Run locally
+
+```bash
+npm install
+npm run dev
+```
+
+Open http://localhost:3000.
+
+### 4. Deploy the PDF worker
+
+See [`pdf-worker/README.md`](./pdf-worker/README.md) for the full Fly.io
+walkthrough. Short version:
+
+```bash
+cd pdf-worker
+fly auth login
+fly launch --no-deploy
+fly secrets set RENDER_SHARED_SECRET=$(openssl rand -hex 32)
+fly deploy
+```
+
+Take the resulting `*.fly.dev` URL and put it in Vercel's `PDF_WORKER_URL`.
+Use the **same** `RENDER_SHARED_SECRET` value on Vercel and Fly.
+
+### 5. Deploy the app
+
+Push to GitHub, connect the repo in Vercel, set the env vars, deploy. After
+the first deploy, add the Vercel URL (e.g. `https://masa-cv.vercel.app`)
+as an allowed Site URL in Supabase → Authentication → URL Configuration.
+
+## How the conversation flow works
+
+1. User opens a new CV → frontend POSTs `/api/cv` to create a draft row
+2. Page loads → ChatPane sends a synthetic first turn that asks Claude to
+   send the Hebrew welcome message and start the first section
+3. Each user reply streams into `/api/cv/[id]/chat` which:
+   - Loads the current `cvs.data` JSON
+   - Builds the 8 tools with handlers that mutate that JSON
+   - Streams Claude's response with tool use enabled
+   - Persists the mutated JSON back to Postgres on `onFinish`
+4. The CVPreviewPane re-fetches the row after each turn and re-renders
+   the live preview (`<CVDocument>`) — same layout as the printed PDF
+5. When `mark_complete` fires, the "צור PDF" button activates → POST
+   `/api/cv/[id]/render` → Fly worker → Supabase Storage → signed URL
+
+## Syncing with the skill repo
+
+When the prompt or PDF template is improved upstream in `cv-skill`, copy
+the four files:
+
+| From `cv-skill` | To `masa-cv-builder` |
 |---|---|
-| `skills/cv-builder/SKILL.md` | `app/lib/prompts/cv-builder-system.md` (system prompt) |
-| `skills/cv-builder/templates/cv_schema.json` | `app/lib/cv-schema.ts` (typed) |
-| `skills/cv-builder/templates/cv_template.html` | `app/lib/cv-template.tsx` (React port) + reused as-is in the PDF worker |
-| `skills/cv-builder/scripts/generate_pdf.py` | `pdf-worker/generate_pdf.py` (verbatim) |
+| `skills/cv-builder/SKILL.md` | `lib/prompts/cv-builder-system.md` |
+| `skills/cv-builder/templates/cv_schema.json` | `lib/cv-schema.ts` (port to TS) |
+| `skills/cv-builder/templates/cv_template.html` | `pdf-worker/templates/cv_template.html` |
+| `skills/cv-builder/scripts/generate_pdf.py` | `pdf-worker/generate_pdf.py` |
 
-When the skill prompt or template improves upstream, sync those four files
-manually. No git submodule (deliberate — see `docs/design.md` §non-goals).
+Note: the **font stack** in `pdf-worker/templates/cv_template.html` is
+intentionally different (adds `Noto Sans Hebrew` for Linux container
+rendering). Don't overwrite that line when syncing.
 
-## Architecture
+## Architecture deep-dive
 
-Full design lives in **[`docs/design.md`](./docs/design.md)** — covers:
-
-- Data model (Postgres schema + RLS)
-- API routes (Next.js App Router)
-- The 8 tool definitions Claude uses to mutate CV state
-- Frontend component tree
-- PDF microservice (Dockerfile + Flask wrapper)
-- Auth strategy (Clerk + email allowlist)
-- Costs (~$5–20/mo at expected scale)
-- Risks & decisions
-- Phased build plan (~2 weeks)
-
-## Next steps
-
-1. Read `docs/design.md`.
-2. Decide on any open questions in §12 of the design doc.
-3. When ready, scaffold Next.js + Supabase + Clerk per §13 day-by-day plan.
+See [`docs/design.md`](./docs/design.md) for the full design — data model,
+tool schemas, route signatures, risks, costs, and the 2-week build plan.
 
 ## License
 

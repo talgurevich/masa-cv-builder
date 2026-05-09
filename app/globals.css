@@ -1,0 +1,26 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body {
+    height: 100%;
+  }
+  body {
+    @apply font-hebrew text-body antialiased bg-white;
+  }
+  h1, h2, h3, h4 {
+    @apply text-ink;
+  }
+  /* Force LTR rendering for inline date ranges and emails inside RTL paragraphs */
+  .ltr {
+    direction: ltr;
+    unicode-bidi: isolate;
+    display: inline-block;
+  }
+}
+
+/* Reusable card */
+.card {
+  @apply rounded-xl border border-slate-200 bg-white shadow-sm;
+}

@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>{{ personal.name or "קורות חיים" }} — קורות חיים</title>
+<style>
+  @page {
+    size: A4;
+    margin: 14mm 16mm;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    direction: rtl;
+    text-align: right;
+    color: #1f2933;
+    font-family: 'Arial Hebrew', 'SF Hebrew', 'Noto Sans Hebrew', 'Liberation Sans', 'Arial', 'Helvetica', sans-serif;
+    font-size: 10.5pt;
+    line-height: 1.55;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .page { max-width: 100%; }
+
+  /* Header */
+  header.cv-head {
+    border-bottom: 2px solid #1d3557;
+    padding-bottom: 10px;
+    margin-bottom: 16px;
+  }
+  header.cv-head h1 {
+    margin: 0 0 4px 0;
+    font-size: 22pt;
+    font-weight: 700;
+    color: #1d3557;
+    letter-spacing: 0.2px;
+  }
+  .contact {
+    font-size: 10pt;
+    color: #4a5568;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+  }
+  .contact span.dot { color: #cbd5e0; }
+  .contact a { color: #2b6cb0; text-decoration: none; }
+
+  /* Sections */
+  section.cv-section {
+    margin-bottom: 14px;
+    page-break-inside: avoid;
+  }
+  section.cv-section h2 {
+    font-size: 12.5pt;
+    font-weight: 700;
+    color: #1d3557;
+    margin: 0 0 8px 0;
+    padding-bottom: 3px;
+    border-bottom: 1px solid #e2e8f0;
+    letter-spacing: 0.3px;
+  }
+
+  /* Entry blocks (education, experience, etc.) */
+  .entry { margin-bottom: 10px; page-break-inside: avoid; }
+  .entry:last-child { margin-bottom: 0; }
+  .entry-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 2px;
+  }
+  .entry-title {
+    font-weight: 700;
+    color: #2d3748;
+    font-size: 11pt;
+  }
+  .entry-dates {
+    font-size: 9.5pt;
+    color: #718096;
+    white-space: nowrap;
+    font-weight: 400;
+    direction: ltr;
+    unicode-bidi: isolate;
+  }
+  .entry-sub {
+    font-size: 10pt;
+    color: #4a5568;
+    margin-bottom: 4px;
+    font-weight: 600;
+  }
+  .entry-extra {
+    font-size: 9.5pt;
+    color: #718096;
+    margin-bottom: 4px;
+  }
+  ul.bullets {
+    margin: 4px 0 0 0;
+    padding: 0 18px 0 0;
+  }
+  ul.bullets li {
+    margin-bottom: 2px;
+  }
+
+  /* Summary paragraph */
+  p.summary {
+    margin: 0;
+    text-align: justify;
+  }
+
+  /* Skills layout */
+  .skills-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px 20px;
+  }
+  .skill-group .skill-label {
+    font-weight: 700;
+    color: #2d3748;
+    margin-left: 6px;
+  }
+  .skill-chip-row { line-height: 1.7; }
+  .chip {
+    display: inline-block;
+    background: #edf2f7;
+    color: #2d3748;
+    padding: 1px 8px;
+    border-radius: 10px;
+    font-size: 9.5pt;
+    margin-left: 4px;
+    margin-bottom: 3px;
+  }
+  .lang-line { margin-bottom: 2px; }
+  .lang-name { font-weight: 600; }
+  .lang-level { color: #718096; font-size: 9.5pt; }
+
+  /* Footer */
+  footer.cv-foot {
+    margin-top: 18px;
+    padding-top: 8px;
+    border-top: 1px solid #e2e8f0;
+    text-align: center;
+    font-size: 8.5pt;
+    color: #a0aec0;
+  }
+
+  @media print {
+    .no-print { display: none !important; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="cv-head">
+    <h1>{{ personal.name or "" }}</h1>
+    <div class="contact">
+      {% if personal.phone %}<span>{{ personal.phone }}</span>{% endif %}
+      {% if personal.phone and (personal.email or personal.city or personal.linkedin or personal.github or personal.portfolio) %}<span class="dot">·</span>{% endif %}
+      {% if personal.email %}<span>{{ personal.email }}</span>{% endif %}
+      {% if personal.email and (personal.city or personal.linkedin or personal.github or personal.portfolio) %}<span class="dot">·</span>{% endif %}
+      {% if personal.city %}<span>{{ personal.city }}</span>{% endif %}
+      {% if personal.city and (personal.linkedin or personal.github or personal.portfolio) %}<span class="dot">·</span>{% endif %}
+      {% if personal.linkedin %}<a href="{{ personal.linkedin }}">LinkedIn</a>{% endif %}
+      {% if personal.linkedin and (personal.github or personal.portfolio) %}<span class="dot">·</span>{% endif %}
+      {% if personal.github %}<a href="{{ personal.github }}">GitHub</a>{% endif %}
+      {% if personal.github and personal.portfolio %}<span class="dot">·</span>{% endif %}
+      {% if personal.portfolio %}<a href="{{ personal.portfolio }}">פורטפוליו</a>{% endif %}
+    </div>
+    {% if personal.extra %}<div class="contact" style="margin-top:4px;">{{ personal.extra }}</div>{% endif %}
+  </header>
+
+  {% if summary %}
+  <section class="cv-section">
+    <h2>תקציר</h2>
+    <p class="summary">{{ summary }}</p>
+  </section>
+  {% endif %}
+
+  {% if education and education|length > 0 and education[0].institution %}
+  <section class="cv-section">
+    <h2>השכלה וקורסים</h2>
+    {% for edu in education %}
+      {% if edu.institution or edu.degree %}
+      <div class="entry">
+        <div class="entry-header">
+          <div class="entry-title">
+            {% if edu.degree %}{{ edu.degree }}{% endif %}
+            {% if edu.field %}{% if edu.degree %} · {% endif %}{{ edu.field }}{% endif %}
+          </div>
+          <div class="entry-dates">{{ edu.start }}{% if edu.start and edu.end %} – {% endif %}{{ edu.end }}</div>
+        </div>
+        {% if edu.institution %}<div class="entry-sub">{{ edu.institution }}</div>{% endif %}
+        {% if edu.grade %}<div class="entry-extra">ציון ממוצע: {{ edu.grade }}</div>{% endif %}
+        {% if edu.highlights and edu.highlights|length > 0 %}
+        <ul class="bullets">
+          {% for h in edu.highlights %}<li>{{ h }}</li>{% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+      {% endif %}
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  {% if experience and experience|length > 0 and experience[0].company %}
+  <section class="cv-section">
+    <h2>ניסיון תעסוקתי</h2>
+    {% for job in experience %}
+      {% if job.company or job.role %}
+      <div class="entry">
+        <div class="entry-header">
+          <div class="entry-title">
+            {% if job.role %}{{ job.role }}{% endif %}
+            {% if job.company %}{% if job.role %} · {% endif %}{{ job.company }}{% endif %}
+          </div>
+          <div class="entry-dates">{{ job.start }}{% if job.start and job.end %} – {% endif %}{{ job.end }}</div>
+        </div>
+        {% if job.bullets and job.bullets|length > 0 %}
+        <ul class="bullets">
+          {% for b in job.bullets %}<li>{{ b }}</li>{% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+      {% endif %}
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  {% if military and not military.skipped and (military.role or military.unit or military.bullets) %}
+  <section class="cv-section">
+    <h2>{% if military.national_service %}שירות לאומי{% else %}ניסיון צבאי{% endif %}</h2>
+    <div class="entry">
+      <div class="entry-header">
+        <div class="entry-title">
+          {% if military.role %}{{ military.role }}{% endif %}
+          {% if military.unit %}{% if military.role %} · {% endif %}{{ military.unit }}{% endif %}
+        </div>
+        <div class="entry-dates">{{ military.start }}{% if military.start and military.end %} – {% endif %}{{ military.end }}</div>
+      </div>
+      {% if military.rank %}<div class="entry-extra">דרגת שחרור: {{ military.rank }}</div>{% endif %}
+      {% if military.bullets and military.bullets|length > 0 %}
+      <ul class="bullets">
+        {% for b in military.bullets %}<li>{{ b }}</li>{% endfor %}
+      </ul>
+      {% endif %}
+    </div>
+  </section>
+  {% endif %}
+
+  {% if volunteering and volunteering|length > 0 and volunteering[0].organization %}
+  <section class="cv-section">
+    <h2>התנדבויות</h2>
+    {% for v in volunteering %}
+      {% if v.organization or v.role %}
+      <div class="entry">
+        <div class="entry-header">
+          <div class="entry-title">
+            {% if v.role %}{{ v.role }}{% endif %}
+            {% if v.organization %}{% if v.role %} · {% endif %}{{ v.organization }}{% endif %}
+          </div>
+          <div class="entry-dates">{{ v.start }}{% if v.start and v.end %} – {% endif %}{{ v.end }}</div>
+        </div>
+        {% if v.description %}<div class="entry-extra">{{ v.description }}</div>{% endif %}
+      </div>
+      {% endif %}
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  {% if skills and (skills.technical or skills.languages or skills.soft) %}
+  <section class="cv-section">
+    <h2>כישורים</h2>
+    {% if skills.technical and skills.technical|length > 0 %}
+    <div class="skill-group skill-chip-row" style="margin-bottom:6px;">
+      <span class="skill-label">כישורים מקצועיים:</span>
+      {% for s in skills.technical %}<span class="chip">{{ s }}</span>{% endfor %}
+    </div>
+    {% endif %}
+    {% if skills.languages and skills.languages|length > 0 and skills.languages[0].name %}
+    <div class="skill-group" style="margin-bottom:6px;">
+      <span class="skill-label">שפות:</span>
+      {% for l in skills.languages %}{% if l.name %}<span class="lang-line">
+        <span class="lang-name">{{ l.name }}</span>{% if l.level %} <span class="lang-level">({{ l.level }})</span>{% endif %}{% if not loop.last %} ·{% endif %}
+      </span>{% endif %}{% endfor %}
+    </div>
+    {% endif %}
+    {% if skills.soft and skills.soft|length > 0 %}
+    <div class="skill-group skill-chip-row">
+      <span class="skill-label">כישורים רכים:</span>
+      {% for s in skills.soft %}<span class="chip">{{ s }}</span>{% endfor %}
+    </div>
+    {% endif %}
+  </section>
+  {% endif %}
+
+</div>
+</body>
+</html>

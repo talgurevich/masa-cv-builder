@@ -52,7 +52,7 @@ internal building blocks.
 | Frontend | Next.js 15 (App Router) + React 19 + Tailwind + shadcn/ui | RTL config in `tailwind.config.ts` (`direction: 'rtl'` on root) |
 | Chat UI | Vercel AI SDK (`useChat`) | Streaming + tool-call rendering out of the box |
 | LLM | Anthropic Claude Sonnet 4.6 with prompt caching | Cache hit on the SKILL.md system prompt |
-| Auth | Clerk | Google + magic link, allowlist by email domain |
+| Auth | Supabase Auth (Google OAuth) | Native integration with RLS via `auth.uid()`. No separate auth service. |
 | DB | Supabase (Postgres) | Users, CV drafts, message history |
 | File storage | Supabase Storage | PDFs, private bucket, signed URLs |
 | PDF renderer | Existing `generate_pdf.py` dockerized on Fly.io | One always-on machine, ~$1–3/mo |
@@ -83,13 +83,19 @@ internal building blocks.
 ## 5. Data model
 
 ```sql
-create table users (
-  id            uuid primary key default gen_random_uuid(),
-  clerk_id      text unique not null,
+-- Supabase Auth manages auth.users out-of-the-box. We mirror only the bits
+-- we care about into a public users table, populated by a trigger.
+
+create table public.users (
+  id            uuid primary key references auth.users(id) on delete cascade,
   email         text not null,
   display_name  text,
+  avatar_url    text,
   created_at    timestamptz default now()
 );
+
+-- Trigger: when auth.users row is created, mirror into public.users.
+-- Allowlist enforcement also happens here (see §10).
 
 create table cvs (
   id                uuid primary key default gen_random_uuid(),
@@ -346,12 +352,24 @@ returned PDF blob to Supabase Storage at
 
 ## 10. Auth strategy
 
-- **Clerk** with two enabled methods: Google OAuth, email magic link.
-- Allowlist enforcement: a `allowed_emails` table (or domain regex) checked
-  in a Clerk webhook on `user.created` — auto-delete users not on the list.
-- Admin invites: simple Postgres insert + a one-line "send invite" mailer.
-- Sessions: Clerk JWT in cookies; server reads `userId` via Clerk's helper
-  and maps to a row in `users` (created on first login).
+- **Supabase Auth with Google OAuth** (the "Web Client" flow).
+  - Configure Google OAuth credentials in Supabase Dashboard → Auth →
+    Providers → Google. Add the Supabase callback URL
+    (`<project>.supabase.co/auth/v1/callback`) as an authorized redirect
+    URI in Google Cloud Console.
+  - Frontend: `supabase.auth.signInWithOAuth({ provider: 'google' })`.
+  - Server: `@supabase/ssr` reads the session cookie. `auth.uid()` is the
+    user id used in RLS.
+- **Allowlist enforcement** via a Postgres trigger on `auth.users`:
+  - Maintain a `public.allowed_emails(email text primary key)` table.
+  - `before insert` trigger on `auth.users` raises an exception when the
+    email isn't in the allowlist — the OAuth flow then errors out and no
+    user row is created. (Easier than deleting after the fact.)
+  - Admin invites: insert a row into `allowed_emails` (one-line operation
+    via Supabase Studio or a tiny admin page).
+- **Sessions:** Supabase manages the cookie. In Server Components and
+  Route Handlers, get the user via `createServerClient(...)` from
+  `@supabase/ssr`. RLS does the authorization automatically.
 
 ---
 
@@ -361,10 +379,9 @@ returned PDF blob to Supabase Storage at
 |---|---|
 | Vercel (Hobby) | $0 |
 | Anthropic API (Claude Sonnet 4.6 with caching) | $5–15 / month |
-| Supabase (Free tier) | $0 (until 500MB DB or 1GB storage) |
+| Supabase (Free tier — DB, Auth, Storage all included) | $0 (until 500MB DB or 1GB storage) |
 | Fly.io PDF worker | $0–3 / month |
-| Clerk (Free tier) | $0 (up to 10K MAU) |
-| **Total** | **~$5–20 / month** |
+| **Total** | **~$5–18 / month** |
 
 ---
 
