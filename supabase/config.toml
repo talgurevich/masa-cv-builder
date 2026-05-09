@@ -1,0 +1,35 @@
+# Supabase project config for masa-cv-builder.
+# Push to the linked project with: `supabase config push --project-ref iespgnekjvppduoyljhi`
+# Requires `supabase login --token <PERSONAL_ACCESS_TOKEN>` first.
+#
+# Secrets are referenced via env() and never committed to git — they must be
+# present in your shell / .env.local at push time.
+
+project_id = "masa-cv-builder"
+
+[auth]
+enabled = true
+# Where users land after sign-in. Update to your production URL after deploy.
+site_url = "http://localhost:3000"
+# Exact URLs the OAuth flow may redirect to.
+additional_redirect_urls = [
+  "http://localhost:3000/auth/callback",
+  # Add Vercel preview + production URLs here once deployed.
+]
+jwt_expiry = 3600
+enable_signup = true
+enable_anonymous_sign_ins = false
+minimum_password_length = 8
+
+[auth.email]
+enable_signup = false  # we don't use email signup; Google only for v1
+enable_confirmations = false
+
+# ─── Google OAuth ───────────────────────────────────────────────────────────
+[auth.external.google]
+enabled = true
+client_id = "102232853683-31buqdtj0sci53ucjflmk24j2ccpq4l4.apps.googleusercontent.com"
+# Resolved from env at push time. Set in .env.local:
+#   SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET=GOCSPX-...
+secret = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET)"
+skip_nonce_check = false
