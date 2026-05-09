@@ -9,12 +9,13 @@ project_id = "masa-cv-builder"
 
 [auth]
 enabled = true
-# Where users land after sign-in. Update to your production URL after deploy.
-site_url = "http://localhost:3000"
+# Where users land after sign-in.
+site_url = "https://masa-cv-builder.vercel.app"
 # Exact URLs the OAuth flow may redirect to.
 additional_redirect_urls = [
   "http://localhost:3000/auth/callback",
-  # Add Vercel preview + production URLs here once deployed.
+  "https://masa-cv-builder.vercel.app/auth/callback",
+  # Vercel preview deployments use rotating URLs; add specific ones if needed.
 ]
 jwt_expiry = 3600
 enable_signup = true
