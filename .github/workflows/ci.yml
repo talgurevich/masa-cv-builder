@@ -6,11 +6,14 @@ on:
   push:
     branches: [main]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   app:
     name: Typecheck & lint (Next.js)
     runs-on: ubuntu-latest
-    if: ${{ hashFiles('package.json') != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -24,7 +27,6 @@ jobs:
   pdf-worker:
     name: Lint Python PDF worker
     runs-on: ubuntu-latest
-    if: ${{ hashFiles('pdf-worker/**/*.py') != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
