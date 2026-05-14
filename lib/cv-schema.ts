@@ -15,6 +15,7 @@ export interface PersonalDetails {
 }
 
 export interface EducationEntry {
+  id: string;
   institution: string;
   degree?: string;
   field?: string;
@@ -25,6 +26,7 @@ export interface EducationEntry {
 }
 
 export interface ExperienceEntry {
+  id: string;
   company: string;
   role: string;
   start: string;
@@ -44,6 +46,7 @@ export interface MilitaryService {
 }
 
 export interface VolunteeringEntry {
+  id: string;
   organization: string;
   role?: string;
   start?: string;

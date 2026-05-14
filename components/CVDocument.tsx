@@ -1,20 +1,26 @@
 /**
- * Live HTML rendering of a CVData object. Mirrors skills/cv-builder/templates/
- * cv_template.html so the on-screen preview matches the printed PDF.
+ * Live HTML rendering of a CVData object. Mirrors the PDF template.
+ *
+ * When `onChange` is provided, fields become inline-editable (click → edit).
+ * Each commit calls `onChange` with the next full CVData, which the parent
+ * is expected to optimistic-set and PATCH to the server.
  */
 
-import type { CVData } from "@/lib/cv-schema";
+"use client";
+
+import type { CVData, EducationEntry, ExperienceEntry, VolunteeringEntry } from "@/lib/cv-schema";
+import { EditableText, EditableTextarea } from "./Editable";
 
 interface Props {
   data: CVData;
+  onChange?: (next: CVData) => void;
 }
 
-export function CVDocument({ data }: Props) {
+export function CVDocument({ data, onChange }: Props) {
   const { personal, summary, education, experience, military, volunteering, skills } =
     data;
+  const editable = !!onChange;
 
-  // Detect a fully-empty CV and show a friendly placeholder instead of a
-  // blank A4. Heuristic: no name + no summary + no first entry in any section.
   const isEmpty =
     !personal?.name &&
     !summary &&
@@ -27,26 +33,38 @@ export function CVDocument({ data }: Props) {
 
   if (isEmpty) return <EmptyPreview />;
 
-  const contactParts = [
-    personal.phone,
-    personal.email,
-    personal.city,
-    personal.linkedin && (
-      <a key="li" href={personal.linkedin} className="text-blue-700 ltr">
-        LinkedIn
-      </a>
-    ),
-    personal.github && (
-      <a key="gh" href={personal.github} className="text-blue-700 ltr">
-        GitHub
-      </a>
-    ),
-    personal.portfolio && (
-      <a key="pf" href={personal.portfolio} className="text-blue-700 ltr">
-        פורטפוליו
-      </a>
-    ),
-  ].filter(Boolean);
+  function update(patch: Partial<CVData>) {
+    onChange?.({ ...data, ...patch });
+  }
+  function updatePersonal(patch: Partial<CVData["personal"]>) {
+    update({ personal: { ...personal, ...patch } });
+  }
+  function updateEducationAt(id: string, patch: Partial<EducationEntry>) {
+    update({
+      education: education.map((e) => (e.id === id ? { ...e, ...patch } : e)),
+    });
+  }
+  function removeEducation(id: string) {
+    update({ education: education.filter((e) => e.id !== id) });
+  }
+  function updateExperienceAt(id: string, patch: Partial<ExperienceEntry>) {
+    update({
+      experience: experience.map((e) => (e.id === id ? { ...e, ...patch } : e)),
+    });
+  }
+  function removeExperience(id: string) {
+    update({ experience: experience.filter((e) => e.id !== id) });
+  }
+  function updateVolunteeringAt(id: string, patch: Partial<VolunteeringEntry>) {
+    update({
+      volunteering: volunteering.map((v) =>
+        v.id === id ? { ...v, ...patch } : v
+      ),
+    });
+  }
+  function removeVolunteering(id: string) {
+    update({ volunteering: volunteering.filter((v) => v.id !== id) });
+  }
 
   const showMilitary =
     military &&
@@ -60,47 +78,145 @@ export function CVDocument({ data }: Props) {
 
   return (
     <article className="text-[10.5pt] leading-relaxed text-body" dir="rtl">
-      {/* ── Header ────────────────────────────────────────────────────── */}
       <header className="border-b-2 border-ink pb-2.5 mb-4">
         <h1 className="m-0 mb-1 text-[22pt] font-bold text-ink">
-          {personal.name || ""}
+          {editable ? (
+            <EditableText
+              value={personal.name ?? ""}
+              placeholder="הוסף שם מלא"
+              onCommit={(v) => updatePersonal({ name: v })}
+              ariaLabel="שם מלא"
+            />
+          ) : (
+            personal.name || ""
+          )}
         </h1>
         <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10pt] text-slate-600">
-          {contactParts.map((p, i) => (
-            <span key={i} className="flex items-center gap-3">
-              {typeof p === "string" ? (
-                <span dir="auto">{p}</span>
-              ) : (
-                p
-              )}
-              {i < contactParts.length - 1 && (
-                <span className="text-slate-300">·</span>
-              )}
-            </span>
-          ))}
+          <ContactItem
+            value={personal.phone}
+            placeholder="טלפון"
+            editable={editable}
+            onCommit={(v) => updatePersonal({ phone: v })}
+          />
+          <ContactItem
+            value={personal.email}
+            placeholder="אימייל"
+            editable={editable}
+            onCommit={(v) => updatePersonal({ email: v })}
+          />
+          <ContactItem
+            value={personal.city}
+            placeholder="עיר"
+            editable={editable}
+            onCommit={(v) => updatePersonal({ city: v })}
+          />
+          {(personal.linkedin || editable) && (
+            <ContactItem
+              value={personal.linkedin}
+              placeholder="קישור LinkedIn"
+              editable={editable}
+              link
+              onCommit={(v) => updatePersonal({ linkedin: v })}
+            />
+          )}
+          {(personal.github || editable) && (
+            <ContactItem
+              value={personal.github}
+              placeholder="קישור GitHub"
+              editable={editable}
+              link
+              onCommit={(v) => updatePersonal({ github: v })}
+            />
+          )}
+          {(personal.portfolio || editable) && (
+            <ContactItem
+              value={personal.portfolio}
+              placeholder="קישור פורטפוליו"
+              editable={editable}
+              link
+              onCommit={(v) => updatePersonal({ portfolio: v })}
+            />
+          )}
         </div>
       </header>
 
-      {/* ── Summary ───────────────────────────────────────────────────── */}
-      {summary && (
+      {(summary || editable) && (
         <Section title="תקציר">
-          <p className="m-0 text-justify">{summary}</p>
+          {editable ? (
+            <EditableTextarea
+              value={summary}
+              placeholder="לחץ להוסיף תקציר…"
+              onCommit={(v) => update({ summary: v })}
+              ariaLabel="תקציר"
+              className="text-justify"
+            />
+          ) : (
+            <p className="m-0 text-justify">{summary}</p>
+          )}
         </Section>
       )}
 
-      {/* ── Education ─────────────────────────────────────────────────── */}
       {education.length > 0 && education[0]?.institution && (
         <Section title="השכלה וקורסים">
-          {education.map((edu, i) => (
+          {education.map((edu) => (
             <Entry
-              key={i}
-              title={[edu.degree, edu.field].filter(Boolean).join(" · ")}
-              sub={edu.institution}
-              dates={dateRange(edu.start, edu.end)}
+              key={edu.id}
+              title={
+                editable ? (
+                  <EditableText
+                    value={[edu.degree, edu.field].filter(Boolean).join(" · ") || ""}
+                    placeholder="תואר · תחום"
+                    onCommit={(v) => {
+                      const [degree, field] = v.split(/\s*·\s*/);
+                      updateEducationAt(edu.id, {
+                        degree: degree ?? "",
+                        field: field ?? "",
+                      });
+                    }}
+                  />
+                ) : (
+                  [edu.degree, edu.field].filter(Boolean).join(" · ")
+                )
+              }
+              sub={
+                editable ? (
+                  <EditableText
+                    value={edu.institution}
+                    placeholder="מוסד"
+                    onCommit={(v) => updateEducationAt(edu.id, { institution: v })}
+                  />
+                ) : (
+                  edu.institution
+                )
+              }
+              dates={
+                editable ? (
+                  <EditableDates
+                    start={edu.start}
+                    end={edu.end}
+                    onCommit={(s, e) =>
+                      updateEducationAt(edu.id, { start: s, end: e })
+                    }
+                  />
+                ) : (
+                  dateRange(edu.start, edu.end)
+                )
+              }
+              onRemove={editable ? () => removeEducation(edu.id) : undefined}
             >
-              {edu.grade && (
+              {(edu.grade || editable) && (
                 <div className="text-[9.5pt] text-slate-500 mb-1">
-                  ציון ממוצע: <span className="ltr">{edu.grade}</span>
+                  ציון ממוצע:{" "}
+                  {editable ? (
+                    <EditableText
+                      value={edu.grade ?? ""}
+                      placeholder="—"
+                      onCommit={(v) => updateEducationAt(edu.id, { grade: v })}
+                      className="ltr"
+                    />
+                  ) : (
+                    <span className="ltr">{edu.grade}</span>
+                  )}
                 </div>
               )}
               {edu.highlights && edu.highlights.length > 0 && (
@@ -115,19 +231,64 @@ export function CVDocument({ data }: Props) {
         </Section>
       )}
 
-      {/* ── Experience ────────────────────────────────────────────────── */}
       {experience.length > 0 && experience[0]?.company && (
         <Section title="ניסיון תעסוקתי">
-          {experience.map((job, i) => (
+          {experience.map((job) => (
             <Entry
-              key={i}
-              title={[job.role, job.company].filter(Boolean).join(" · ")}
-              dates={dateRange(job.start, job.end)}
+              key={job.id}
+              title={
+                editable ? (
+                  <span>
+                    <EditableText
+                      value={job.role}
+                      placeholder="תפקיד"
+                      onCommit={(v) => updateExperienceAt(job.id, { role: v })}
+                    />
+                    {" · "}
+                    <EditableText
+                      value={job.company}
+                      placeholder="חברה"
+                      onCommit={(v) => updateExperienceAt(job.id, { company: v })}
+                    />
+                  </span>
+                ) : (
+                  [job.role, job.company].filter(Boolean).join(" · ")
+                )
+              }
+              dates={
+                editable ? (
+                  <EditableDates
+                    start={job.start}
+                    end={job.end}
+                    onCommit={(s, e) =>
+                      updateExperienceAt(job.id, { start: s ?? "", end: e })
+                    }
+                  />
+                ) : (
+                  dateRange(job.start, job.end)
+                )
+              }
+              onRemove={editable ? () => removeExperience(job.id) : undefined}
             >
               {job.bullets.length > 0 && (
                 <ul className="m-0 mt-1 pr-5 list-disc">
                   {job.bullets.map((b, j) => (
-                    <li key={j}>{b}</li>
+                    <li key={j}>
+                      {editable ? (
+                        <EditableText
+                          value={b}
+                          placeholder="…"
+                          onCommit={(v) => {
+                            const next = job.bullets.slice();
+                            if (v) next[j] = v;
+                            else next.splice(j, 1);
+                            updateExperienceAt(job.id, { bullets: next });
+                          }}
+                        />
+                      ) : (
+                        b
+                      )}
+                    </li>
                   ))}
                 </ul>
               )}
@@ -136,16 +297,60 @@ export function CVDocument({ data }: Props) {
         </Section>
       )}
 
-      {/* ── Military ──────────────────────────────────────────────────── */}
       {showMilitary && (
         <Section title={military.national_service ? "שירות לאומי" : "ניסיון צבאי"}>
           <Entry
-            title={[military.role, military.unit].filter(Boolean).join(" · ")}
-            dates={dateRange(military.start, military.end)}
+            title={
+              editable ? (
+                <span>
+                  <EditableText
+                    value={military.role ?? ""}
+                    placeholder="תפקיד"
+                    onCommit={(v) =>
+                      update({ military: { ...military, role: v } })
+                    }
+                  />
+                  {" · "}
+                  <EditableText
+                    value={military.unit ?? ""}
+                    placeholder="יחידה"
+                    onCommit={(v) =>
+                      update({ military: { ...military, unit: v } })
+                    }
+                  />
+                </span>
+              ) : (
+                [military.role, military.unit].filter(Boolean).join(" · ")
+              )
+            }
+            dates={
+              editable ? (
+                <EditableDates
+                  start={military.start}
+                  end={military.end}
+                  onCommit={(s, e) =>
+                    update({ military: { ...military, start: s, end: e } })
+                  }
+                />
+              ) : (
+                dateRange(military.start, military.end)
+              )
+            }
           >
-            {military.rank && (
+            {(military.rank || editable) && (
               <div className="text-[9.5pt] text-slate-500 mb-1">
-                דרגת שחרור: {military.rank}
+                דרגת שחרור:{" "}
+                {editable ? (
+                  <EditableText
+                    value={military.rank ?? ""}
+                    placeholder="—"
+                    onCommit={(v) =>
+                      update({ military: { ...military, rank: v } })
+                    }
+                  />
+                ) : (
+                  military.rank
+                )}
               </div>
             )}
             {military.bullets && military.bullets.length > 0 && (
@@ -159,18 +364,60 @@ export function CVDocument({ data }: Props) {
         </Section>
       )}
 
-      {/* ── Volunteering ──────────────────────────────────────────────── */}
       {volunteering.length > 0 && volunteering[0]?.organization && (
         <Section title="התנדבויות">
-          {volunteering.map((v, i) => (
+          {volunteering.map((v) => (
             <Entry
-              key={i}
-              title={[v.role, v.organization].filter(Boolean).join(" · ")}
-              dates={dateRange(v.start, v.end)}
+              key={v.id}
+              title={
+                editable ? (
+                  <span>
+                    <EditableText
+                      value={v.role ?? ""}
+                      placeholder="תפקיד"
+                      onCommit={(val) => updateVolunteeringAt(v.id, { role: val })}
+                    />
+                    {" · "}
+                    <EditableText
+                      value={v.organization}
+                      placeholder="ארגון"
+                      onCommit={(val) =>
+                        updateVolunteeringAt(v.id, { organization: val })
+                      }
+                    />
+                  </span>
+                ) : (
+                  [v.role, v.organization].filter(Boolean).join(" · ")
+                )
+              }
+              dates={
+                editable ? (
+                  <EditableDates
+                    start={v.start}
+                    end={v.end}
+                    onCommit={(s, e) =>
+                      updateVolunteeringAt(v.id, { start: s, end: e })
+                    }
+                  />
+                ) : (
+                  dateRange(v.start, v.end)
+                )
+              }
+              onRemove={editable ? () => removeVolunteering(v.id) : undefined}
             >
-              {v.description && (
+              {(v.description || editable) && (
                 <div className="text-[9.5pt] text-slate-500">
-                  {v.description}
+                  {editable ? (
+                    <EditableTextarea
+                      value={v.description ?? ""}
+                      placeholder="תיאור קצר…"
+                      onCommit={(val) =>
+                        updateVolunteeringAt(v.id, { description: val })
+                      }
+                    />
+                  ) : (
+                    v.description
+                  )}
                 </div>
               )}
             </Entry>
@@ -178,7 +425,6 @@ export function CVDocument({ data }: Props) {
         </Section>
       )}
 
-      {/* ── Skills ────────────────────────────────────────────────────── */}
       {hasAnySkills && (
         <Section title="כישורים">
           {(skills.technical?.length ?? 0) > 0 && (
@@ -225,8 +471,66 @@ export function CVDocument({ data }: Props) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Sub-components
-// ────────────────────────────────────────────────────────────────────────────
+
+function ContactItem({
+  value,
+  placeholder,
+  editable,
+  link,
+  onCommit,
+}: {
+  value?: string;
+  placeholder: string;
+  editable: boolean;
+  link?: boolean;
+  onCommit: (next: string) => void;
+}) {
+  if (editable) {
+    return (
+      <EditableText
+        value={value ?? ""}
+        placeholder={placeholder}
+        onCommit={onCommit}
+        className={link ? "text-blue-700 ltr" : ""}
+      />
+    );
+  }
+  if (!value) return null;
+  if (link) {
+    return (
+      <a href={value} className="text-blue-700 ltr">
+        {placeholder}
+      </a>
+    );
+  }
+  return <span dir="auto">{value}</span>;
+}
+
+function EditableDates({
+  start,
+  end,
+  onCommit,
+}: {
+  start?: string;
+  end?: string;
+  onCommit: (start: string | undefined, end: string | undefined) => void;
+}) {
+  return (
+    <span className="ltr">
+      <EditableText
+        value={start ?? ""}
+        placeholder="התחלה"
+        onCommit={(v) => onCommit(v || undefined, end)}
+      />
+      {" – "}
+      <EditableText
+        value={end ?? ""}
+        placeholder="סיום"
+        onCommit={(v) => onCommit(start, v || undefined)}
+      />
+    </span>
+  );
+}
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -244,16 +548,31 @@ function Entry({
   sub,
   dates,
   children,
+  onRemove,
 }: {
-  title?: string;
-  sub?: string;
-  dates?: string;
+  title?: React.ReactNode;
+  sub?: React.ReactNode;
+  dates?: React.ReactNode;
   children?: React.ReactNode;
+  onRemove?: () => void;
 }) {
   return (
-    <div className="mb-2.5">
+    <div className="mb-2.5 group relative">
       <div className="flex items-baseline justify-between gap-2.5 mb-0.5">
-        <div className="font-bold text-slate-700 text-[11pt]">{title}</div>
+        <div className="font-bold text-slate-700 text-[11pt] flex items-center gap-1.5">
+          {title}
+          {onRemove && (
+            <button
+              type="button"
+              onClick={onRemove}
+              className="opacity-0 group-hover:opacity-100 focus:opacity-100 transition text-slate-400 hover:text-red-600 text-xs"
+              aria-label="מחק פריט"
+              title="מחק פריט"
+            >
+              ×
+            </button>
+          )}
+        </div>
         {dates && (
           <div className="text-[9.5pt] text-slate-500 whitespace-nowrap ltr">
             {dates}

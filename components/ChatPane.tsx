@@ -34,13 +34,10 @@ export function ChatPane({ cvId, initialMessages, onTurnComplete }: Props) {
     initialMessages,
     onFinish: () => {
       onTurnComplete();
-      // Re-focus after the assistant finishes streaming.
       requestAnimationFrame(() => inputRef.current?.focus());
     },
   });
 
-  // Auto-trigger the welcome on a fresh CV (only when there are no
-  // persisted messages — otherwise we're resuming an existing session).
   useEffect(() => {
     if (initRef.current) return;
     if (messages.length === 0 && (initialMessages?.length ?? 0) === 0) {
@@ -50,46 +47,36 @@ export function ChatPane({ cvId, initialMessages, onTurnComplete }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Auto-scroll to bottom on new messages OR when the thinking indicator
-  // appears/disappears (so the indicator is always visible).
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages, status]);
 
-  // Focus the input on mount so users can start typing immediately.
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
 
-  // Re-focus whenever the input becomes enabled again (e.g. after a turn).
   useEffect(() => {
     if (status === "ready") {
       inputRef.current?.focus();
     }
   }, [status]);
 
-  // If the user clicks anywhere in the chat pane that isn't a button or a
-  // text-selectable region, return focus to the input. This covers the
-  // common "I clicked outside the input by accident" case.
   function handlePaneClick(e: React.MouseEvent<HTMLDivElement>) {
     const target = e.target as HTMLElement;
     if (target.closest("button, a, input, textarea, [data-keep-selection]"))
       return;
-    if (window.getSelection()?.toString()) return; // user is selecting text
+    if (window.getSelection()?.toString()) return;
     inputRef.current?.focus();
   }
 
   const isLoading = status === "submitted" || status === "streaming";
 
-  // Hide the synthetic first-turn prompt from the user's view.
   const visibleMessages = messages.filter(
     (m, i) => !(i === 0 && m.role === "user" && m.content === FIRST_TURN_PROMPT)
   );
 
-  // Monotonic counter that grows as new content arrives. The thinking
-  // indicator uses this to detect "stream went silent" (= tool running).
   const contentSize = useMemo(() => {
     let size = 0;
     for (const m of messages) {
@@ -100,6 +87,66 @@ export function ChatPane({ cvId, initialMessages, onTurnComplete }: Props) {
     return size;
   }, [messages]);
 
+  // The latest in-flight tool name (if any) — drives the ThinkingIndicator
+  // label so users see "מעדכן השכלה..." instead of a generic "..."
+  const latestTool = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      const parts = m.parts ?? [];
+      for (let j = parts.length - 1; j >= 0; j--) {
+        const p = parts[j];
+        if (p.type === "tool-invocation") {
+          const inv = p.toolInvocation;
+          if (inv.state === "call" || inv.state === "partial-call") {
+            return inv.toolName;
+          }
+          // Found the most recent invocation but it's already resolved.
+          return null;
+        }
+      }
+      const tis = m.toolInvocations ?? [];
+      for (let j = tis.length - 1; j >= 0; j--) {
+        const inv = tis[j];
+        if (inv.state === "call" || inv.state === "partial-call") {
+          return inv.toolName;
+        }
+        return null;
+      }
+    }
+    return null;
+  }, [messages]);
+
+  // Find the most recent assistant clarification request. Only the latest one
+  // is interactive; older clarifications stay visible as inert chips.
+  const pendingClarificationKey = useMemo(() => {
+    if (isLoading) return null;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.role !== "assistant") continue;
+      const parts = m.parts ?? [];
+      for (let j = parts.length - 1; j >= 0; j--) {
+        const p = parts[j];
+        if (p.type === "tool-invocation") {
+          const inv = p.toolInvocation;
+          if (
+            inv.toolName === "ask_for_clarification" &&
+            inv.state === "result"
+          ) {
+            return `${m.id}:${inv.toolCallId}`;
+          }
+        }
+      }
+      // First assistant message we see that doesn't end on a clarification
+      // means there's no pending one.
+      return null;
+    }
+    return null;
+  }, [messages, isLoading]);
+
+  function pickClarification(value: string) {
+    append({ role: "user", content: value });
+  }
+
   return (
     <div className="flex flex-col h-full" onClick={handlePaneClick}>
       <div className="px-4 py-3 border-b border-slate-100">
@@ -108,9 +155,18 @@ export function ChatPane({ cvId, initialMessages, onTurnComplete }: Props) {
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
         {visibleMessages.map((m) => (
-          <MessageBubble key={m.id} message={m} />
+          <MessageBubble
+            key={m.id}
+            message={m}
+            pendingClarificationKey={pendingClarificationKey}
+            onPickClarification={pickClarification}
+          />
         ))}
-        <ThinkingIndicator status={status} contentSize={contentSize} />
+        <ThinkingIndicator
+          status={status}
+          contentSize={contentSize}
+          activeTool={latestTool}
+        />
         {error && (
           <div className="text-sm text-red-600">שגיאה: {error.message}</div>
         )}
@@ -142,17 +198,51 @@ export function ChatPane({ cvId, initialMessages, onTurnComplete }: Props) {
   );
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Single message bubble. Renders text + tool invocations inline.
-// ────────────────────────────────────────────────────────────────────────────
+interface ClarificationResult {
+  ok: boolean;
+  kind?: "clarification";
+  question?: string;
+  options?: { value: string; label: string }[];
+}
 
-function MessageBubble({ message }: { message: Message }) {
+function MessageBubble({
+  message,
+  pendingClarificationKey,
+  onPickClarification,
+}: {
+  message: Message;
+  pendingClarificationKey: string | null;
+  onPickClarification: (value: string) => void;
+}) {
   const isUser = message.role === "user";
-
-  // v4 represents tool calls in `toolInvocations` (deprecated path) or in
-  // `parts` (newer). We support both for forward-compat.
   const parts = message.parts;
   const toolInvocations = message.toolInvocations;
+
+  function renderInvocation(inv: {
+    state: string;
+    toolName: string;
+    toolCallId: string;
+    result?: unknown;
+  }) {
+    if (inv.toolName === "ask_for_clarification" && inv.state === "result") {
+      const result = inv.result as ClarificationResult | undefined;
+      const isPending =
+        pendingClarificationKey === `${message.id}:${inv.toolCallId}`;
+      if (result?.question && result?.options) {
+        return (
+          <ClarificationPanel
+            question={result.question}
+            options={result.options}
+            interactive={isPending}
+            onPick={onPickClarification}
+          />
+        );
+      }
+    }
+    return (
+      <ToolCallChip name={inv.toolName} state={inv.state} />
+    );
+  }
 
   return (
     <div className={isUser ? "flex justify-start" : "flex justify-end"}>
@@ -172,13 +262,10 @@ function MessageBubble({ message }: { message: Message }) {
               );
             }
             if (p.type === "tool-invocation") {
-              const inv = p.toolInvocation;
               return (
-                <ToolCallChip
-                  key={i}
-                  name={inv.toolName}
-                  state={inv.state}
-                />
+                <div key={i}>
+                  {renderInvocation(p.toolInvocation)}
+                </div>
               );
             }
             return null;
@@ -189,14 +276,46 @@ function MessageBubble({ message }: { message: Message }) {
               <div className="whitespace-pre-wrap">{message.content}</div>
             )}
             {toolInvocations?.map((inv, i) => (
-              <ToolCallChip
-                key={i}
-                name={inv.toolName}
-                state={inv.state}
-              />
+              <div key={i}>{renderInvocation(inv)}</div>
             ))}
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+function ClarificationPanel({
+  question,
+  options,
+  interactive,
+  onPick,
+}: {
+  question: string;
+  options: { value: string; label: string }[];
+  interactive: boolean;
+  onPick: (value: string) => void;
+}) {
+  return (
+    <div className="my-1 rounded-xl bg-white/40 px-3 py-2">
+      <div className="text-sm mb-2 text-slate-700">{question}</div>
+      <div className="flex flex-wrap gap-2">
+        {options.map((opt, i) => (
+          <button
+            key={i}
+            type="button"
+            disabled={!interactive}
+            onClick={() => onPick(opt.value)}
+            className={[
+              "text-sm rounded-full px-3 py-1 border transition",
+              interactive
+                ? "bg-white border-slate-300 hover:border-ink hover:bg-slate-50 text-slate-800"
+                : "bg-slate-50 border-slate-200 text-slate-400 cursor-not-allowed",
+            ].join(" ")}
+          >
+            {opt.label}
+          </button>
+        ))}
       </div>
     </div>
   );

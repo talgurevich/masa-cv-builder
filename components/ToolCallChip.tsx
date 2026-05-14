@@ -7,16 +7,17 @@ const HEBREW_LABELS: Record<string, string> = {
   update_personal: "עדכון פרטים אישיים",
   update_summary: "עדכון תקציר",
   add_education: "הוספת השכלה",
-  update_education_at: "עדכון השכלה",
-  remove_education_at: "מחיקת השכלה",
+  update_education: "עדכון השכלה",
+  remove_education: "מחיקת השכלה",
   add_experience: "הוספת ניסיון תעסוקתי",
-  update_experience_at: "עדכון ניסיון תעסוקתי",
-  remove_experience_at: "מחיקת ניסיון תעסוקתי",
+  update_experience: "עדכון ניסיון תעסוקתי",
+  remove_experience: "מחיקת ניסיון תעסוקתי",
   set_military: "עדכון ניסיון צבאי",
   add_volunteering: "הוספת התנדבות",
-  update_volunteering_at: "עדכון התנדבות",
-  remove_volunteering_at: "מחיקת התנדבות",
+  update_volunteering: "עדכון התנדבות",
+  remove_volunteering: "מחיקת התנדבות",
   update_skills: "עדכון כישורים",
+  ask_for_clarification: "בקשת הבהרה",
   mark_complete: "סיום בניית קורות החיים",
 };
 
@@ -30,3 +31,6 @@ export function ToolCallChip({ name, state }: Props) {
     </div>
   );
 }
+
+// Mapping used by the thinking indicator to label the in-flight tool.
+export const TOOL_LABELS_HE: Record<string, string> = HEBREW_LABELS;

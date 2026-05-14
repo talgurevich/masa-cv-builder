@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { supabaseServer } from "@/lib/supabase/server";
 import type { CVData } from "@/lib/cv-schema";
+import { loadIntoState } from "@/lib/cv-tools";
 import { CVWorkbench } from "@/components/CVWorkbench";
 import type { Message } from "ai";
 
@@ -31,10 +32,14 @@ export default async function CVPage({
     (row) => row.content as Message
   );
 
+  const hydratedData = cvRes.data.data
+    ? loadIntoState(cvRes.data.data).cv
+    : null;
+
   return (
     <CVWorkbench
       cvId={cvRes.data.id}
-      initialData={(cvRes.data.data as CVData) ?? null}
+      initialData={(hydratedData as CVData) ?? null}
       initialStatus={cvRes.data.status}
       initialPdfPath={cvRes.data.pdf_path}
       initialMessages={initialMessages}

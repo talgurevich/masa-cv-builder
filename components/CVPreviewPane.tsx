@@ -10,6 +10,7 @@ interface Props {
   status: string;
   pdfPath: string | null;
   onPdfPath: (p: string | null) => void;
+  onChange?: (next: CVData) => void;
 }
 
 export function CVPreviewPane({
@@ -18,6 +19,7 @@ export function CVPreviewPane({
   status,
   pdfPath,
   onPdfPath,
+  onChange,
 }: Props) {
   const [generating, setGenerating] = useState(false);
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
@@ -74,7 +76,7 @@ export function CVPreviewPane({
         {/* A4 sheet — horizontally scrolls only if smaller than 210mm,
             otherwise centers and clamps to the page width. */}
         <div className="mx-auto bg-white shadow-md w-full max-w-[210mm] min-h-[297mm] p-[14mm]">
-          <CVDocument data={data} />
+          <CVDocument data={data} onChange={onChange} />
         </div>
       </div>
     </div>

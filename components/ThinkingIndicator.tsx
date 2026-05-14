@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { TOOL_LABELS_HE } from "./ToolCallChip";
 
 type ChatStatus = "submitted" | "streaming" | "ready" | "error";
 
@@ -9,24 +10,38 @@ interface Props {
   /** Length of the JSON-serialized messages array (or any monotonic counter
    *  that increases when new content arrives). Used to detect pauses. */
   contentSize: number;
+  /** Name of the currently in-flight tool, if any. When set, the indicator
+   *  shows a tool-specific label instead of the generic "background action". */
+  activeTool?: string | null;
 }
 
-/**
- * Visible thinking indicator that distinguishes:
- *   - "שולח..." while the request is in-flight before the first chunk
- *   - "מקליד..." while text is actively streaming
- *   - "מבצע פעולה ברקע..." when the stream pauses (a server-side tool is
- *     running). Detected by watching contentSize — if it hasn't changed
- *     for more than ~600ms while status is still streaming, we're paused.
- *
- * Renders nothing when status is "ready" or "error".
- */
-export function ThinkingIndicator({ status, contentSize }: Props) {
+const ACTIVE_VERBS: Record<string, string> = {
+  update_personal: "מעדכן פרטים אישיים",
+  update_summary: "מעדכן תקציר",
+  add_education: "מוסיף השכלה",
+  update_education: "מעדכן השכלה",
+  remove_education: "מוחק השכלה",
+  add_experience: "מוסיף ניסיון תעסוקתי",
+  update_experience: "מעדכן ניסיון תעסוקתי",
+  remove_experience: "מוחק ניסיון תעסוקתי",
+  set_military: "מעדכן ניסיון צבאי",
+  add_volunteering: "מוסיף התנדבות",
+  update_volunteering: "מעדכן התנדבות",
+  remove_volunteering: "מוחק התנדבות",
+  update_skills: "מעדכן כישורים",
+  ask_for_clarification: "מבקש הבהרה",
+  mark_complete: "מסיים את קורות החיים",
+};
+
+function activeLabel(toolName: string): string {
+  return ACTIVE_VERBS[toolName] ?? TOOL_LABELS_HE[toolName] ?? toolName;
+}
+
+export function ThinkingIndicator({ status, contentSize, activeTool }: Props) {
   const lastSizeRef = useRef(contentSize);
   const lastChangeRef = useRef(Date.now());
-  const [, force] = useState(0); // force re-render via interval
+  const [, force] = useState(0);
 
-  // Update the change timestamp whenever content grows.
   useEffect(() => {
     if (contentSize !== lastSizeRef.current) {
       lastSizeRef.current = contentSize;
@@ -34,7 +49,6 @@ export function ThinkingIndicator({ status, contentSize }: Props) {
     }
   }, [contentSize]);
 
-  // While loading, tick every 200ms so the "paused" state can flip on.
   useEffect(() => {
     if (status !== "streaming" && status !== "submitted") return;
     const id = setInterval(() => force((n) => n + 1), 200);
@@ -47,11 +61,14 @@ export function ThinkingIndicator({ status, contentSize }: Props) {
   const isPaused = status === "streaming" && sincePause > 600;
   const isSubmitting = status === "submitted";
 
-  const label = isSubmitting
-    ? "שולח..."
-    : isPaused
-      ? "מבצע פעולה ברקע..."
-      : "מקליד...";
+  let label: string;
+  if (isSubmitting) {
+    label = "שולח...";
+  } else if (isPaused) {
+    label = activeTool ? `${activeLabel(activeTool)}...` : "מבצע פעולה ברקע...";
+  } else {
+    label = "מקליד...";
+  }
 
   return (
     <div className="flex justify-end" aria-live="polite">

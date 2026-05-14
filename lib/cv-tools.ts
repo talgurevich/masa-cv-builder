@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { tool, type Tool } from "ai";
+import { randomUUID } from "node:crypto";
 import type {
   CVData,
   EducationEntry,
@@ -9,21 +10,24 @@ import type {
 import { emptyCV } from "./cv-schema";
 
 /**
- * Each list-mutation tool returns an ack that includes the up-to-date
- * entries (with indices) so the LLM knows what to target on subsequent
- * remove / update calls. This eliminates the previous bug where the bot
- * couldn't remove or edit entries because it had no stable references.
+ * Tools for mutating a CVData state container. List entries are addressed by
+ * stable `id` (uuid). Indices are not used — they shift on remove and confuse
+ * the LLM across multi-turn sessions.
+ *
+ * Each tool calls `persist()` after mutating so the DB is durable mid-stream
+ * (a dropped connection won't lose data already collected). Callers wire
+ * `persist` to a debounced supabase update.
  */
 
 interface IndexedEntry {
-  index: number;
+  id: string;
   label: string;
   dates?: string;
 }
 
-function fmtEducation(e: EducationEntry, i: number): IndexedEntry {
+function fmtEducation(e: EducationEntry): IndexedEntry {
   return {
-    index: i,
+    id: e.id,
     label:
       [e.degree, e.field, e.institution].filter(Boolean).join(" · ") ||
       "(ללא כותרת)",
@@ -31,34 +35,39 @@ function fmtEducation(e: EducationEntry, i: number): IndexedEntry {
   };
 }
 
-function fmtExperience(x: ExperienceEntry, i: number): IndexedEntry {
+function fmtExperience(x: ExperienceEntry): IndexedEntry {
   return {
-    index: i,
+    id: x.id,
     label:
       [x.role, x.company].filter(Boolean).join(" · ") || "(ללא כותרת)",
     dates: [x.start, x.end].filter(Boolean).join("–") || undefined,
   };
 }
 
-function fmtVolunteering(v: VolunteeringEntry, i: number): IndexedEntry {
+function fmtVolunteering(v: VolunteeringEntry): IndexedEntry {
   return {
-    index: i,
+    id: v.id,
     label:
       [v.role, v.organization].filter(Boolean).join(" · ") || "(ללא כותרת)",
     dates: [v.start, v.end].filter(Boolean).join("–") || undefined,
   };
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Tool definitions (Vercel AI SDK format)
-// ────────────────────────────────────────────────────────────────────────────
+interface BuildToolsOptions {
+  persist: () => void;
+}
 
-export function buildCvTools(state: { cv: CVData }) {
+export function buildCvTools(
+  state: { cv: CVData },
+  opts: BuildToolsOptions = { persist: () => {} }
+) {
+  const { persist } = opts;
+
   const tools: Record<string, Tool> = {
     // ── Personal ─────────────────────────────────────────────────────────
     update_personal: tool({
       description:
-        'עדכון "פרטים אישיים" של המשתמש. מעבירים רק שדות שהמשתמש סיפק. שולחים רק שדות שיש להם ערך.',
+        'עדכון "פרטים אישיים" של המשתמש. שלח רק שדות שהמשתמש סיפק.',
       parameters: z.object({
         name: z.string().optional(),
         phone: z.string().optional(),
@@ -70,6 +79,7 @@ export function buildCvTools(state: { cv: CVData }) {
       }),
       execute: async (input) => {
         state.cv.personal = { ...state.cv.personal, ...input };
+        persist();
         return { ok: true, section: "personal", value: state.cv.personal };
       },
     }),
@@ -77,18 +87,18 @@ export function buildCvTools(state: { cv: CVData }) {
     // ── Summary ──────────────────────────────────────────────────────────
     update_summary: tool({
       description:
-        'הגדרה או החלפה של תקציר הקורות חיים (paragraph אחד). עבור עריכת תקציר קיים - גם כן זה הכלי הנכון.',
+        "הגדרה או החלפה של תקציר הקורות חיים. גם לעריכה - זה הכלי הנכון.",
       parameters: z.object({ text: z.string().min(1) }),
       execute: async ({ text }) => {
         state.cv.summary = text;
+        persist();
         return { ok: true, section: "summary" };
       },
     }),
 
     // ── Education ────────────────────────────────────────────────────────
     add_education: tool({
-      description:
-        'הוספת פריט אחד לסעיף "השכלה וקורסים". משתמש כאשר המשתמש מספר על מוסד / קורס חדש שטרם נרשם.',
+      description: 'הוספת פריט אחד לסעיף "השכלה וקורסים".',
       parameters: z.object({
         institution: z.string(),
         degree: z.string().optional(),
@@ -99,21 +109,23 @@ export function buildCvTools(state: { cv: CVData }) {
         highlights: z.array(z.string()).optional(),
       }),
       execute: async (input) => {
-        state.cv.education.push(input);
+        const entry: EducationEntry = { id: randomUUID(), ...input };
+        state.cv.education.push(entry);
+        persist();
         return {
           ok: true,
           section: "education",
+          id: entry.id,
           total: state.cv.education.length,
-          entries: state.cv.education.map(fmtEducation),
         };
       },
     }),
 
-    update_education_at: tool({
+    update_education: tool({
       description:
-        'עדכון פריט קיים בסעיף "השכלה" לפי אינדקס. שלח רק שדות שצריך לשנות. השתמש לתקן טעויות או להוסיף פרטים שחסרו.',
+        'עדכון פריט קיים בסעיף "השכלה" לפי id. שלח רק שדות שצריך לשנות. ה-id מופיע ב-<current_cv>.',
       parameters: z.object({
-        index: z.number().int().nonnegative(),
+        id: z.string(),
         institution: z.string().optional(),
         degree: z.string().optional(),
         field: z.string().optional(),
@@ -122,52 +134,47 @@ export function buildCvTools(state: { cv: CVData }) {
         grade: z.string().optional(),
         highlights: z.array(z.string()).optional(),
       }),
-      execute: async ({ index, ...patch }) => {
-        if (index < 0 || index >= state.cv.education.length) {
+      execute: async ({ id, ...patch }) => {
+        const idx = state.cv.education.findIndex((e) => e.id === id);
+        if (idx === -1) {
           return {
             ok: false,
-            error: `אין פריט באינדקס ${index}; יש ${state.cv.education.length} פריטים.`,
+            error: `אין פריט השכלה עם id=${id}.`,
             entries: state.cv.education.map(fmtEducation),
           };
         }
-        state.cv.education[index] = { ...state.cv.education[index], ...patch };
-        return {
-          ok: true,
-          section: "education",
-          updated_index: index,
-          entries: state.cv.education.map(fmtEducation),
-        };
+        state.cv.education[idx] = { ...state.cv.education[idx], ...patch };
+        persist();
+        return { ok: true, section: "education", id };
       },
     }),
 
-    remove_education_at: tool({
+    remove_education: tool({
       description:
-        'מחיקת פריט מסעיף "השכלה" לפי אינדקס. השתמש כאשר המשתמש אומר במפורש להסיר / למחוק / לבטל פריט.',
-      parameters: z.object({
-        index: z.number().int().nonnegative(),
-      }),
-      execute: async ({ index }) => {
-        if (index < 0 || index >= state.cv.education.length) {
+        'מחיקת פריט מסעיף "השכלה" לפי id. השתמש כאשר המשתמש מבקש במפורש למחוק.',
+      parameters: z.object({ id: z.string() }),
+      execute: async ({ id }) => {
+        const idx = state.cv.education.findIndex((e) => e.id === id);
+        if (idx === -1) {
           return {
             ok: false,
-            error: `אין פריט באינדקס ${index}; יש ${state.cv.education.length} פריטים.`,
+            error: `אין פריט השכלה עם id=${id}.`,
             entries: state.cv.education.map(fmtEducation),
           };
         }
-        const removed = state.cv.education.splice(index, 1)[0];
+        const removed = state.cv.education.splice(idx, 1)[0];
+        persist();
         return {
           ok: true,
           section: "education",
-          removed_label: fmtEducation(removed, index).label,
-          entries: state.cv.education.map(fmtEducation),
+          removed_label: fmtEducation(removed).label,
         };
       },
     }),
 
     // ── Experience ───────────────────────────────────────────────────────
     add_experience: tool({
-      description:
-        'הוספת תפקיד אחד לסעיף "ניסיון תעסוקתי". משתמש כאשר המשתמש מספר על תפקיד חדש שטרם נרשם.',
+      description: 'הוספת תפקיד אחד לסעיף "ניסיון תעסוקתי".',
       parameters: z.object({
         company: z.string(),
         role: z.string(),
@@ -176,68 +183,67 @@ export function buildCvTools(state: { cv: CVData }) {
         bullets: z.array(z.string()).default([]),
       }),
       execute: async (input) => {
-        state.cv.experience.push({ ...input, bullets: input.bullets ?? [] });
+        const entry: ExperienceEntry = {
+          id: randomUUID(),
+          ...input,
+          bullets: input.bullets ?? [],
+        };
+        state.cv.experience.push(entry);
+        persist();
         return {
           ok: true,
           section: "experience",
+          id: entry.id,
           total: state.cv.experience.length,
-          entries: state.cv.experience.map(fmtExperience),
         };
       },
     }),
 
-    update_experience_at: tool({
+    update_experience: tool({
       description:
-        'עדכון תפקיד קיים ב"ניסיון תעסוקתי" לפי אינדקס. שלח רק שדות שצריך לשנות.',
+        'עדכון תפקיד קיים ב"ניסיון תעסוקתי" לפי id. שלח רק שדות שצריך לשנות.',
       parameters: z.object({
-        index: z.number().int().nonnegative(),
+        id: z.string(),
         company: z.string().optional(),
         role: z.string().optional(),
         start: z.string().optional(),
         end: z.string().optional(),
         bullets: z.array(z.string()).optional(),
       }),
-      execute: async ({ index, ...patch }) => {
-        if (index < 0 || index >= state.cv.experience.length) {
+      execute: async ({ id, ...patch }) => {
+        const idx = state.cv.experience.findIndex((e) => e.id === id);
+        if (idx === -1) {
           return {
             ok: false,
-            error: `אין תפקיד באינדקס ${index}; יש ${state.cv.experience.length} תפקידים.`,
+            error: `אין תפקיד עם id=${id}.`,
             entries: state.cv.experience.map(fmtExperience),
           };
         }
-        state.cv.experience[index] = {
-          ...state.cv.experience[index],
-          ...patch,
-        };
-        return {
-          ok: true,
-          section: "experience",
-          updated_index: index,
-          entries: state.cv.experience.map(fmtExperience),
-        };
+        state.cv.experience[idx] = { ...state.cv.experience[idx], ...patch };
+        persist();
+        return { ok: true, section: "experience", id };
       },
     }),
 
-    remove_experience_at: tool({
+    remove_experience: tool({
       description:
-        'מחיקת תפקיד מ"ניסיון תעסוקתי" לפי אינדקס. השתמש כאשר המשתמש אומר במפורש להסיר.',
-      parameters: z.object({
-        index: z.number().int().nonnegative(),
-      }),
-      execute: async ({ index }) => {
-        if (index < 0 || index >= state.cv.experience.length) {
+        'מחיקת תפקיד מ"ניסיון תעסוקתי" לפי id. השתמש כאשר המשתמש אומר במפורש להסיר.',
+      parameters: z.object({ id: z.string() }),
+      execute: async ({ id }) => {
+        const idx = state.cv.experience.findIndex((e) => e.id === id);
+        if (idx === -1) {
           return {
             ok: false,
-            error: `אין תפקיד באינדקס ${index}; יש ${state.cv.experience.length} תפקידים.`,
+            error: `אין תפקיד עם id=${id}.`,
             entries: state.cv.experience.map(fmtExperience),
           };
         }
-        const removed = state.cv.experience.splice(index, 1)[0];
+        const removed = state.cv.experience.splice(idx, 1)[0];
+        persist();
         return {
           ok: true,
           section: "experience",
-          removed_label: fmtExperience(removed, index).label,
-          entries: state.cv.experience.map(fmtExperience),
+          removed_label: fmtExperience(removed).label,
         };
       },
     }),
@@ -245,7 +251,7 @@ export function buildCvTools(state: { cv: CVData }) {
     // ── Military (single object, not list) ────────────────────────────────
     set_military: tool({
       description:
-        'הגדרת "ניסיון צבאי". אפשר לסמן skipped אם המשתמש לא שירת, או national_service אם שירות לאומי. גם לעריכה - זה הכלי הנכון.',
+        'הגדרת "ניסיון צבאי". skipped אם לא שירת, national_service אם שירות לאומי. גם לעריכה.',
       parameters: z.object({
         skipped: z.boolean().default(false),
         national_service: z.boolean().default(false),
@@ -258,14 +264,14 @@ export function buildCvTools(state: { cv: CVData }) {
       }),
       execute: async (input) => {
         state.cv.military = { ...state.cv.military, ...input };
+        persist();
         return { ok: true, section: "military", value: state.cv.military };
       },
     }),
 
     // ── Volunteering ─────────────────────────────────────────────────────
     add_volunteering: tool({
-      description:
-        'הוספת פריט אחד לסעיף "התנדבויות".',
+      description: 'הוספת פריט אחד לסעיף "התנדבויות".',
       parameters: z.object({
         organization: z.string(),
         role: z.string().optional(),
@@ -274,76 +280,73 @@ export function buildCvTools(state: { cv: CVData }) {
         description: z.string().optional(),
       }),
       execute: async (input) => {
-        state.cv.volunteering.push(input);
+        const entry: VolunteeringEntry = { id: randomUUID(), ...input };
+        state.cv.volunteering.push(entry);
+        persist();
         return {
           ok: true,
           section: "volunteering",
+          id: entry.id,
           total: state.cv.volunteering.length,
-          entries: state.cv.volunteering.map(fmtVolunteering),
         };
       },
     }),
 
-    update_volunteering_at: tool({
+    update_volunteering: tool({
       description:
-        'עדכון התנדבות קיימת לפי אינדקס. שלח רק שדות שצריך לשנות.',
+        'עדכון התנדבות קיימת לפי id. שלח רק שדות שצריך לשנות.',
       parameters: z.object({
-        index: z.number().int().nonnegative(),
+        id: z.string(),
         organization: z.string().optional(),
         role: z.string().optional(),
         start: z.string().optional(),
         end: z.string().optional(),
         description: z.string().optional(),
       }),
-      execute: async ({ index, ...patch }) => {
-        if (index < 0 || index >= state.cv.volunteering.length) {
+      execute: async ({ id, ...patch }) => {
+        const idx = state.cv.volunteering.findIndex((e) => e.id === id);
+        if (idx === -1) {
           return {
             ok: false,
-            error: `אין התנדבות באינדקס ${index}; יש ${state.cv.volunteering.length} התנדבויות.`,
+            error: `אין התנדבות עם id=${id}.`,
             entries: state.cv.volunteering.map(fmtVolunteering),
           };
         }
-        state.cv.volunteering[index] = {
-          ...state.cv.volunteering[index],
+        state.cv.volunteering[idx] = {
+          ...state.cv.volunteering[idx],
           ...patch,
         };
-        return {
-          ok: true,
-          section: "volunteering",
-          updated_index: index,
-          entries: state.cv.volunteering.map(fmtVolunteering),
-        };
+        persist();
+        return { ok: true, section: "volunteering", id };
       },
     }),
 
-    remove_volunteering_at: tool({
-      description:
-        'מחיקת התנדבות לפי אינדקס. השתמש כאשר המשתמש אומר במפורש להסיר.',
-      parameters: z.object({
-        index: z.number().int().nonnegative(),
-      }),
-      execute: async ({ index }) => {
-        if (index < 0 || index >= state.cv.volunteering.length) {
+    remove_volunteering: tool({
+      description: "מחיקת התנדבות לפי id.",
+      parameters: z.object({ id: z.string() }),
+      execute: async ({ id }) => {
+        const idx = state.cv.volunteering.findIndex((e) => e.id === id);
+        if (idx === -1) {
           return {
             ok: false,
-            error: `אין התנדבות באינדקס ${index}; יש ${state.cv.volunteering.length} התנדבויות.`,
+            error: `אין התנדבות עם id=${id}.`,
             entries: state.cv.volunteering.map(fmtVolunteering),
           };
         }
-        const removed = state.cv.volunteering.splice(index, 1)[0];
+        const removed = state.cv.volunteering.splice(idx, 1)[0];
+        persist();
         return {
           ok: true,
           section: "volunteering",
-          removed_label: fmtVolunteering(removed, index).label,
-          entries: state.cv.volunteering.map(fmtVolunteering),
+          removed_label: fmtVolunteering(removed).label,
         };
       },
     }),
 
-    // ── Skills (already replace-style) ────────────────────────────────────
+    // ── Skills (replace-style) ────────────────────────────────────────────
     update_skills: tool({
       description:
-        'החלפת רשימות כישורים. שולחים תמיד רשימה מלאה, לא דלתא. גם לעריכה - שלח את הרשימה החדשה במלואה.',
+        "החלפת רשימות כישורים. שלח את הרשימות המלאות, לא דלתא.",
       parameters: z.object({
         technical: z.array(z.string()).optional(),
         languages: z
@@ -353,17 +356,43 @@ export function buildCvTools(state: { cv: CVData }) {
       }),
       execute: async (input) => {
         state.cv.skills = { ...state.cv.skills, ...input };
+        persist();
         return { ok: true, section: "skills", value: state.cv.skills };
+      },
+    }),
+
+    // ── Disambiguation ────────────────────────────────────────────────────
+    ask_for_clarification: tool({
+      description:
+        "שואל את המשתמש להבהרה כשיש אי-בהירות שצריך לפתור לפני פעולה (למשל: מספר פריטים מתאימים לבקשה). הצג 2–4 אפשרויות ברורות.",
+      parameters: z.object({
+        question: z.string(),
+        options: z
+          .array(
+            z.object({
+              value: z.string(),
+              label: z.string(),
+            })
+          )
+          .min(2)
+          .max(4),
+      }),
+      execute: async (input) => {
+        // No state mutation — the UI renders option buttons and waits for
+        // the user to pick one. The result is returned so the LLM can also
+        // see what it asked.
+        return { ok: true, kind: "clarification", ...input };
       },
     }),
 
     // ── Completion ───────────────────────────────────────────────────────
     mark_complete: tool({
       description:
-        'קוראים לכלי הזה כאשר כל שבעת הסעיפים מולאו והמשתמש מאושר. הצעד הבא הוא הצעה ליצירת PDF.',
+        "קוראים לכלי הזה כאשר כל שבעת הסעיפים מולאו והמשתמש מאושר. הצעד הבא הוא הצעה ליצירת PDF.",
       parameters: z.object({}),
       execute: async () => {
         state.cv.meta.last_updated = new Date().toISOString();
+        persist();
         return { ok: true, section: "complete" };
       },
     }),
@@ -373,8 +402,9 @@ export function buildCvTools(state: { cv: CVData }) {
 }
 
 /**
- * Apply a saved CVData (from Postgres) into a fresh state container so
- * a new chat turn can mutate it via tool calls.
+ * Apply a saved CVData (from Postgres) into a fresh state container. Backfills
+ * stable IDs onto any list entries that don't yet have one (covers rows that
+ * predate the id refactor).
  */
 export function loadIntoState(data: unknown): { cv: CVData } {
   const cv = (data && typeof data === "object" ? data : emptyCV()) as CVData;
@@ -386,5 +416,16 @@ export function loadIntoState(data: unknown): { cv: CVData } {
   cv.volunteering ??= [];
   cv.skills ??= { technical: [], languages: [], soft: [] };
   cv.meta ??= {};
+
+  for (const e of cv.education) {
+    if (!e.id) e.id = randomUUID();
+  }
+  for (const e of cv.experience) {
+    if (!e.id) e.id = randomUUID();
+  }
+  for (const v of cv.volunteering) {
+    if (!v.id) v.id = randomUUID();
+  }
+
   return { cv };
 }
