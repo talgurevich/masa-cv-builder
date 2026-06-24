@@ -2,7 +2,6 @@ import {
   AlignmentType,
   BorderStyle,
   Document,
-  HeadingLevel,
   Packer,
   Paragraph,
   TextRun,
@@ -43,7 +42,6 @@ function sectionHeading(text: string) {
     children: [rtlRun(text, { bold: true, size: 26, color: HEADING_COLOR })],
     bidirectional: true,
     alignment: AlignmentType.RIGHT,
-    heading: HeadingLevel.HEADING_2,
     spacing: { before: 240, after: 120 },
     border: {
       bottom: { style: BorderStyle.SINGLE, size: 6, color: "E2E8F0", space: 2 },
@@ -258,8 +256,18 @@ export async function renderCvDocx(raw: Partial<CVData>): Promise<Buffer> {
       default: {
         document: {
           run: { font: HEBREW_FONT, size: 21, rightToLeft: true },
+          paragraph: { alignment: AlignmentType.RIGHT },
         },
       },
+      paragraphStyles: [
+        {
+          id: "Normal",
+          name: "Normal",
+          quickFormat: true,
+          run: { font: HEBREW_FONT, rightToLeft: true },
+          paragraph: { alignment: AlignmentType.RIGHT },
+        },
+      ],
     },
     sections: [
       {
