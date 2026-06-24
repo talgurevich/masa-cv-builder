@@ -22,6 +22,7 @@ export function CVPreviewPane({
   onChange,
 }: Props) {
   const [generating, setGenerating] = useState(false);
+  const [generatingDocx, setGeneratingDocx] = useState(false);
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
 
   async function generatePDF() {
@@ -37,6 +38,30 @@ export function CVPreviewPane({
       alert("שגיאה ביצירת PDF: " + (err instanceof Error ? err.message : err));
     } finally {
       setGenerating(false);
+    }
+  }
+
+  async function generateDOCX() {
+    setGeneratingDocx(true);
+    try {
+      const res = await fetch(`/api/cv/${cvId}/render-docx`, { method: "POST" });
+      if (!res.ok) throw new Error(await res.text());
+      const blob = await res.blob();
+      const disposition = res.headers.get("Content-Disposition") ?? "";
+      const match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+      const filename = match ? decodeURIComponent(match[1]) : "cv.docx";
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert("שגיאה ביצירת DOCX: " + (err instanceof Error ? err.message : err));
+    } finally {
+      setGeneratingDocx(false);
     }
   }
 
@@ -68,6 +93,18 @@ export function CVPreviewPane({
             className="rounded-lg bg-ink text-white px-3 py-1.5 text-sm font-medium disabled:opacity-50 hover:bg-ink/90 transition"
           >
             {generating ? "מפיק…" : pdfPath ? "הפק מחדש" : "צור PDF"}
+          </button>
+          <button
+            onClick={generateDOCX}
+            disabled={!ready || generatingDocx}
+            title={
+              ready
+                ? "הורד קובץ Word לעריכה"
+                : "קודם נסיים למלא את כל הסעיפים"
+            }
+            className="rounded-lg border border-ink text-ink px-3 py-1.5 text-sm font-medium disabled:opacity-50 hover:bg-ink/5 transition"
+          >
+            {generatingDocx ? "מפיק…" : "צור DOCX"}
           </button>
         </div>
       </div>
