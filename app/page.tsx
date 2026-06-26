@@ -81,6 +81,13 @@ export default async function HomePage() {
               <p className="text-xs text-slate-400 mt-3">
                 ההתחברות מאובטחת ע&quot;י Google.
               </p>
+              <p className="text-sm text-slate-600 mt-4">
+                כבר יש לך קורות חיים?{" "}
+                <span className="text-ink font-medium">
+                  אפשר להעלות אותם אחרי ההתחברות
+                </span>{" "}
+                ולהמשיך משם.
+              </p>
             </div>
           </div>
 
