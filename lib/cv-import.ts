@@ -297,7 +297,9 @@ function normalize(parsed: z.infer<typeof ExtractedSchema>): CVData {
       description: v.description,
     })),
     skills: parsed.skills,
-    meta: { last_updated: new Date().toISOString() },
+    // Intentionally leave meta empty — `meta.last_updated` is the
+    // "mark_complete" sentinel used elsewhere to flip status to 'complete'.
+    meta: {},
   };
 }
 
