@@ -150,7 +150,24 @@ export async function POST(
     },
   });
 
-  return result.toDataStreamResponse();
+  return result.toDataStreamResponse({
+    getErrorMessage: (err) => {
+      const raw =
+        err instanceof Error
+          ? err.message
+          : typeof err === "string"
+            ? err
+            : JSON.stringify(err ?? "");
+      if (/credit balance is too low/i.test(raw)) {
+        return (
+          "אזלו הקרדיטים בחשבון ה-Anthropic של המערכת. " +
+          "כדי להמשיך, אנא פנו לטל גורביץ׳ במייל tal.gurevich@gmail.com או בטלפון 0504425322 " +
+          "וציינו את השם שלי."
+        );
+      }
+      return raw || "שגיאה לא ידועה.";
+    },
+  });
 }
 
 // GET returns the CV row + persisted messages so the workbench can hydrate.
