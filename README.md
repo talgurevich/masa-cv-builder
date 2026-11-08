@@ -34,9 +34,9 @@ Browser → members.masaelhaofek.co.il/cv ──(rewrite in member-tools)──�
 - `lib/paths.ts` — `BASE_PATH`, the members' URL, and `api()` for client `fetch` calls (fetch doesn't add the basePath)
 - `lib/` — Supabase clients, Anthropic helper, CV schema, the tool definitions Claude calls to edit the CV
 - `lib/prompts/cv-builder-system.md` — system prompt (mirrored from `cv-skill`)
-- `supabase/migrations/` — **history of the old standalone project only.** The live schema is
+- `supabase/migrations/` — **history of the old standalone project only** (that project was deleted on 2026-11-08). The live schema is
   `0009_cv_builder.sql` in the masa-tools repo, which owns the members' project migrations.
-- `pdf-worker/` — the old Fly.io worker; no longer called (PDFs render on Vercel with `@sparticuz/chromium`)
+- PDFs render in `app/api/cv/[id]/render` with `@sparticuz/chromium` on Vercel, from the HTML in `lib/cv-template.ts`
 
 ## Environment
 
@@ -77,18 +77,16 @@ then open http://127.0.0.1:3000/cv (use 127.0.0.1, not localhost, as in member-t
 ## Syncing with the skill repo
 
 When the prompt or PDF template is improved upstream in `cv-skill`, copy
-the four files:
+these files:
 
 | From `cv-skill` | To `masa-cv-builder` |
 |---|---|
 | `skills/cv-builder/SKILL.md` | `lib/prompts/cv-builder-system.md` |
 | `skills/cv-builder/templates/cv_schema.json` | `lib/cv-schema.ts` (port to TS) |
-| `skills/cv-builder/templates/cv_template.html` | `pdf-worker/templates/cv_template.html` |
-| `skills/cv-builder/scripts/generate_pdf.py` | `pdf-worker/generate_pdf.py` |
+| `skills/cv-builder/templates/cv_template.html` | `lib/cv-template.ts` (port the markup and CSS) |
 
-Note: the **font stack** in `pdf-worker/templates/cv_template.html` is
-intentionally different (adds `Noto Sans Hebrew` for Linux container
-rendering). Don't overwrite that line when syncing.
+Note: the **font stack** in `lib/cv-template.ts` loads `Noto Sans Hebrew` from Google Fonts,
+because the serverless Chromium has no Hebrew system fonts. Keep that when syncing.
 
 ## Architecture deep-dive
 

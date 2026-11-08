@@ -1,7 +1,0 @@
-__pycache__
-*.pyc
-.venv
-*.pdf
-.git
-fly.toml
-README.md

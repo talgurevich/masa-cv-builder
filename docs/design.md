@@ -1,5 +1,9 @@
 # CV Builder Web App — Design Doc
 
+> **Historical.** This is the original design. Since then: PDFs render on Vercel (no Fly.io worker),
+> and the app runs at members.masaelhaofek.co.il/cv on the members' Supabase project and login.
+> See the README for the current setup.
+
 A hosted, conversational Hebrew CV builder for **'מסע אל האופק'** teams and
 students. Reuses the prompt and PDF pipeline from this skill repo as the
 internal building blocks.
