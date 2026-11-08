@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { supabaseServer, supabaseService } from "@/lib/supabase/server";
+import { supabaseServer } from "@/lib/supabase/server";
 import type { CVData } from "@/lib/cv-schema";
 import { renderCvHtml } from "@/lib/cv-template";
 
@@ -95,16 +95,15 @@ export async function POST(
     return NextResponse.json({ error: `PDF render failed: ${msg}` }, { status: 500 });
   }
 
-  const service = supabaseService();
+  // Uploaded as the member (storage policy: only into their own <user id>/ folder).
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
   const path = `${user.id}/${cv.id}/${ts}.pdf`;
 
-  const { error: uploadErr } = await service.storage
+  const { error: uploadErr } = await supabase.storage
     .from("cv-pdfs")
     .upload(path, pdfBuf, {
       contentType: "application/pdf",
       cacheControl: "60",
-      upsert: true,
     });
 
   if (uploadErr) {
@@ -113,7 +112,7 @@ export async function POST(
 
   await supabase.from("cvs").update({ pdf_path: path }).eq("id", id);
 
-  const { data: signed, error: signErr } = await service.storage
+  const { data: signed, error: signErr } = await supabase.storage
     .from("cv-pdfs")
     .createSignedUrl(path, 60 * 5);
 

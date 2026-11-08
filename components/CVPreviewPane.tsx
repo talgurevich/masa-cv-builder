@@ -1,5 +1,6 @@
 "use client";
 
+import { api } from "@/lib/paths";
 import { useState } from "react";
 import type { CVData } from "@/lib/cv-schema";
 import { CVDocument } from "./CVDocument";
@@ -29,7 +30,7 @@ export function CVPreviewPane({
     setGenerating(true);
     setSignedUrl(null);
     try {
-      const res = await fetch(`/api/cv/${cvId}/render`, { method: "POST" });
+      const res = await fetch(api(`/api/cv/${cvId}/render`), { method: "POST" });
       if (!res.ok) throw new Error(await res.text());
       const { signedUrl, path } = await res.json();
       setSignedUrl(signedUrl);
@@ -44,7 +45,7 @@ export function CVPreviewPane({
   async function generateDOCX() {
     setGeneratingDocx(true);
     try {
-      const res = await fetch(`/api/cv/${cvId}/render-docx`, { method: "POST" });
+      const res = await fetch(api(`/api/cv/${cvId}/render-docx`), { method: "POST" });
       if (!res.ok) throw new Error(await res.text());
       const blob = await res.blob();
       const disposition = res.headers.get("Content-Disposition") ?? "";

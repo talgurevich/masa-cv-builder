@@ -1,5 +1,6 @@
 "use client";
 
+import { api } from "@/lib/paths";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -9,14 +10,14 @@ export function NewCVButton() {
 
   async function create() {
     setLoading(true);
-    const res = await fetch("/api/cv", { method: "POST" });
+    const res = await fetch(api("/api/cv"), { method: "POST" });
     if (!res.ok) {
       setLoading(false);
       alert("שגיאה ביצירת CV חדש");
       return;
     }
     const { id } = await res.json();
-    router.push(`/cv/${id}`);
+    router.push(`/${id}`);
   }
 
   return (

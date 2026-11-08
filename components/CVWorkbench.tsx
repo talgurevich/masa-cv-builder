@@ -1,5 +1,6 @@
 "use client";
 
+import { api } from "@/lib/paths";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Message } from "ai";
 import { ChatPane } from "./ChatPane";
@@ -39,7 +40,7 @@ export function CVWorkbench({
   }, [cvData]);
 
   const refreshCV = useCallback(async () => {
-    const res = await fetch(`/api/cv/${cvId}/chat`, { method: "GET" });
+    const res = await fetch(api(`/api/cv/${cvId}/chat`), { method: "GET" });
     if (!res.ok) return;
     const cv = await res.json();
     if (cv?.data) setCvData(cv.data);
@@ -96,7 +97,7 @@ export function CVWorkbench({
       const ctrl = new AbortController();
       patchInflight.current = ctrl;
       try {
-        const res = await fetch(`/api/cv/${cvId}`, {
+        const res = await fetch(api(`/api/cv/${cvId}`), {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ data: next }),

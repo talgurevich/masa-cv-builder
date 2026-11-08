@@ -1,5 +1,6 @@
 "use client";
 
+import { api } from "@/lib/paths";
 import { useChat } from "@ai-sdk/react";
 import { useEffect, useMemo, useRef } from "react";
 import type { Message } from "ai";
@@ -30,7 +31,7 @@ export function ChatPane({ cvId, initialMessages, onTurnComplete }: Props) {
     status,
     error,
   } = useChat({
-    api: `/api/cv/${cvId}/chat`,
+    api: api(`/api/cv/${cvId}/chat`),
     initialMessages,
     onFinish: () => {
       onTurnComplete();

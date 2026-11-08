@@ -79,7 +79,7 @@ export async function POST(request: Request) {
   }
 
   const seed = buildImportSeedMessage(data);
-  await supabase.from("messages").insert({
+  await supabase.from("cv_messages").insert({
     cv_id: row.id,
     role: "assistant",
     content: seed,

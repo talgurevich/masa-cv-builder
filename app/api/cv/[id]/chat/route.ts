@@ -56,7 +56,7 @@ export async function POST(
       parts: lastMsg.parts,
       createdAt: new Date().toISOString(),
     };
-    await supabase.from("messages").insert({
+    await supabase.from("cv_messages").insert({
       cv_id: id,
       role: "user",
       content: stored,
@@ -139,7 +139,7 @@ export async function POST(
       // so chat history on reload renders chips and stays faithful.
       const stored = buildAssistantStoredMessages(response.messages, text);
       if (stored.length > 0) {
-        await supabase.from("messages").insert(
+        await supabase.from("cv_messages").insert(
           stored.map((s) => ({
             cv_id: id,
             role: "assistant",
@@ -189,7 +189,7 @@ export async function GET(
       .eq("id", id)
       .single(),
     supabase
-      .from("messages")
+      .from("cv_messages")
       .select("content, role, created_at")
       .eq("cv_id", id)
       .order("created_at", { ascending: true }),

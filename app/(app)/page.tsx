@@ -44,7 +44,7 @@ export default async function CVListPage() {
         {(cvs ?? []).map((cv) => (
           <li key={cv.id}>
             <Link
-              href={`/cv/${cv.id}`}
+              href={`/${cv.id}`}
               className="card p-4 flex items-center justify-between hover:shadow-md transition"
             >
               <div>

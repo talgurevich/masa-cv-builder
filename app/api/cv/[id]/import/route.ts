@@ -82,10 +82,10 @@ export async function POST(
   if (updErr) {
     return NextResponse.json({ error: updErr.message }, { status: 500 });
   }
-  await supabase.from("messages").delete().eq("cv_id", id);
+  await supabase.from("cv_messages").delete().eq("cv_id", id);
 
   const seed = buildImportSeedMessage(data);
-  await supabase.from("messages").insert({
+  await supabase.from("cv_messages").insert({
     cv_id: id,
     role: "assistant",
     content: seed,

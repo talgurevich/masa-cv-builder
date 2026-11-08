@@ -20,7 +20,7 @@ export default async function CVPage({
       .eq("id", id)
       .single(),
     supabase
-      .from("messages")
+      .from("cv_messages")
       .select("content, created_at")
       .eq("cv_id", id)
       .order("created_at", { ascending: true }),

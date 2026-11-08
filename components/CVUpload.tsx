@@ -1,5 +1,6 @@
 "use client";
 
+import { api } from "@/lib/paths";
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -58,7 +59,7 @@ export function CVUpload({ cvId, onDone, compact = false }: Props) {
 
     try {
       setStatus("analyzing");
-      const url = cvId ? `/api/cv/${cvId}/import` : `/api/cv/import`;
+      const url = api(cvId ? `/api/cv/${cvId}/import` : `/api/cv/import`);
       const res = await fetch(url, { method: "POST", body: fd });
       if (!res.ok) {
         const body = await res.json().catch(() => ({ error: "שגיאה לא ידועה" }));
@@ -66,7 +67,7 @@ export function CVUpload({ cvId, onDone, compact = false }: Props) {
       }
       const { id } = await res.json();
       if (onDone) onDone(id);
-      else router.push(`/cv/${id}`);
+      else router.push(`/${id}`);
     } catch (e) {
       setStatus("idle");
       setError(e instanceof Error ? e.message : String(e));

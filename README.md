@@ -1,108 +1,63 @@
 # masa-cv-builder
 
-Hosted, conversational Hebrew CV builder for **'מסע אל האופק'** teams and
-students. Companion web app to the standalone Claude Code skill at
+Conversational Hebrew CV builder for the participants of **מסע אל האופק**, served at
+**https://members.masaelhaofek.co.il/cv**. Companion web app to the standalone Claude Code skill at
 [talgurevich/cv-skill](https://github.com/talgurevich/cv-skill).
 
 ```
-   Browser  →  Next.js (Vercel)  →  Anthropic Claude (Sonnet 4.6 + tools)
-                     │
-                     ▼
-                 Supabase (Auth + Postgres + Storage)
-                     │
-                     ▼
-                 Fly.io PDF worker (Chromium + generate_pdf.py)
+Browser → members.masaelhaofek.co.il/cv ──(rewrite in member-tools)──▶ this app (Vercel, basePath /cv)
+                                                                          │
+                                       Anthropic Claude (chat + tools) ◀──┤
+                                                                          ▼
+                                  Supabase "masa-tools-members" (members' login, Postgres, Storage)
 ```
+
+## How it fits with the members' site
+
+- **One login.** The members' site ([talgurevich/member-tools](https://github.com/talgurevich/member-tools))
+  forwards `/cv` and `/cv/*` here. Its proxy checks the login and the Monday boards first, and its Supabase
+  session cookie reaches this app because the browser sees one domain.
+- **Checked again here.** `middleware.ts` repeats the check (`getClaims` + `am_i_member()`), so this app's own
+  `*.vercel.app` address is closed too. Logged-out visitors go to the members' `/login?next=/cv...`;
+  API calls get a 401.
+- **Per member.** Every CV row carries the member's `auth.uid()`. RLS (in
+  `masa-tools/supabase/migrations/0009_cv_builder.sql`) lets each member read and write only their own CVs,
+  chat messages and PDFs, and only while they are on a board.
+- **No service-role key.** The app uses the publishable key and the member's session for everything,
+  including the PDF upload, so it holds nothing that can reach staff data.
 
 ## What's here
 
-- `app/` — Next.js 15 App Router (chat page, dashboard, auth, API routes)
-- `components/` — chat pane, live CV preview pane, login button, etc.
-- `lib/` — Supabase clients (browser + server + middleware), Anthropic
-  helper, CV schema, **the 8 tool definitions** that Claude calls to mutate
-  CV state
+- `app/(app)/` — the CV list (`/cv`) and the workbench (`/cv/<id>`)
+- `app/api/cv/` — create, import, chat (streaming, Claude + tools), patch, render PDF / DOCX
+- `components/` — chat pane, live preview, upload
+- `lib/paths.ts` — `BASE_PATH`, the members' URL, and `api()` for client `fetch` calls (fetch doesn't add the basePath)
+- `lib/` — Supabase clients, Anthropic helper, CV schema, the tool definitions Claude calls to edit the CV
 - `lib/prompts/cv-builder-system.md` — system prompt (mirrored from `cv-skill`)
-- `supabase/migrations/0001_init.sql` — schema, RLS policies, allowlist
-  trigger, storage bucket
-- `pdf-worker/` — standalone Flask + Chromium service for Fly.io
-- `docs/design.md` — full architecture spec
+- `supabase/migrations/` — **history of the old standalone project only.** The live schema is
+  `0009_cv_builder.sql` in the masa-tools repo, which owns the members' project migrations.
+- `pdf-worker/` — the old Fly.io worker; no longer called (PDFs render on Vercel with `@sparticuz/chromium`)
 
-## Setup
+## Environment
 
-### 0. Prerequisites
+| Variable | Value |
+| --- | --- |
+| `NEXT_PUBLIC_SUPABASE_URL` | the members' project URL (same as member-tools) |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | the members' project publishable key (same as member-tools) |
+| `ANTHROPIC_API_KEY` | Claude, for the chat and CV import |
+| `NEXT_PUBLIC_MEMBERS_URL` | optional, defaults to `https://members.masaelhaofek.co.il` |
 
-- Node 20+
-- A Supabase project ([create one](https://supabase.com/dashboard))
-- A Vercel project (we'll connect it later)
-- An Anthropic API key
-- Fly.io CLI (`brew install flyctl`) for the PDF worker
-- A Google Cloud OAuth client (Web type) for sign-in
+## Run locally
 
-### 1. Configure Supabase
-
-In the Supabase dashboard:
-
-1. **Run the migration** — open SQL Editor and paste
-   `supabase/migrations/0001_init.sql`. This creates `users`, `cvs`,
-   `messages`, `allowed_emails`, the `cv-pdfs` storage bucket, and all
-   RLS policies.
-2. **Enable Google OAuth** — Authentication → Providers → Google →
-   paste your Google OAuth client ID and secret. Copy the redirect URL
-   Supabase shows you and add it to your Google OAuth client's
-   "Authorized redirect URIs".
-3. **Add your email to the allowlist:**
-   ```sql
-   insert into public.allowed_emails (email) values ('you@example.com');
-   ```
-   Anyone not in this table gets blocked at sign-in by the trigger.
-
-### 2. Configure Vercel + env vars
-
-Copy `.env.example` to `.env.local` and fill in:
-
-```bash
-cp .env.example .env.local
-```
-
-You need:
-- `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` — Supabase Settings → API
-- `SUPABASE_SERVICE_ROLE_KEY` — same page, "Service role" secret. Keep server-only.
-- `ANTHROPIC_API_KEY` — https://console.anthropic.com → API Keys
-- `PDF_WORKER_URL` — fill in after step 4
-- `RENDER_SHARED_SECRET` — `openssl rand -hex 32`
-
-When deploying to Vercel, set the same vars under Project Settings → Environment Variables.
-
-### 3. Run locally
+The login lives on the members' site, so run both: member-tools on port 3000 with
+`CV_BUILDER_URL=http://127.0.0.1:3001` in its `.env.local`, and this app with
 
 ```bash
 npm install
-npm run dev
+NEXT_PUBLIC_MEMBERS_URL=http://127.0.0.1:3000 npx next dev -p 3001
 ```
 
-Open http://localhost:3000.
-
-### 4. Deploy the PDF worker
-
-See [`pdf-worker/README.md`](./pdf-worker/README.md) for the full Fly.io
-walkthrough. Short version:
-
-```bash
-cd pdf-worker
-fly auth login
-fly launch --no-deploy
-fly secrets set RENDER_SHARED_SECRET=$(openssl rand -hex 32)
-fly deploy
-```
-
-Take the resulting `*.fly.dev` URL and put it in Vercel's `PDF_WORKER_URL`.
-Use the **same** `RENDER_SHARED_SECRET` value on Vercel and Fly.
-
-### 5. Deploy the app
-
-Push to GitHub, connect the repo in Vercel, set the env vars, deploy. After
-the first deploy, add the Vercel URL (e.g. `https://masa-cv.vercel.app`)
-as an allowed Site URL in Supabase → Authentication → URL Configuration.
+then open http://127.0.0.1:3000/cv (use 127.0.0.1, not localhost, as in member-tools).
 
 ## How the conversation flow works
 
@@ -117,7 +72,7 @@ as an allowed Site URL in Supabase → Authentication → URL Configuration.
 4. The CVPreviewPane re-fetches the row after each turn and re-renders
    the live preview (`<CVDocument>`) — same layout as the printed PDF
 5. When `mark_complete` fires, the "צור PDF" button activates → POST
-   `/api/cv/[id]/render` → Fly worker → Supabase Storage → signed URL
+   `/api/cv/[id]/render` → Chromium on Vercel → Supabase Storage → signed URL
 
 ## Syncing with the skill repo
 
